@@ -5,14 +5,14 @@ import java.util.*;
 
 /** Bounded in-memory trace. Only stage tokens, integer counters and allowlisted faults. */
 public final class DiagnosticLog {
-    public static final String VERSION="0.4.1";
+    public static final String VERSION="0.4.2";
     private static boolean enabled;
     private static final ArrayDeque<String> lines=new ArrayDeque<>();
     private static final Set<String> REASONS=new HashSet<>(Arrays.asList(
         "unexpected_origin","missing_frame","unexpected_frame","invalid_credentials_length",
         "missing_form","unexpected_form","unexpected_fields","disabled_button","changed_fields",
         "manual_checkbox","manual_accesscode","attempt_cancelled","response_limit","page_unavailable",
-        "redirect_limit","unexpected_login_page","authentication_rejected","login_form_returned"));
+        "redirect_limit","unexpected_login_page","authentication_rejected","login_form_returned","submission_response_unavailable"));
     public static synchronized void setEnabled(boolean value) {
         if(enabled==value)return;
         enabled=value;append(value?"logging.enabled":"logging.disabled");

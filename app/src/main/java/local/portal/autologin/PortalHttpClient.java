@@ -7,6 +7,10 @@ import java.util.*;
 
 /** No WebView, global proxy changes, certificate bypass, or global cookie store. */
 public final class PortalHttpClient {
+    /** Bytes may have reached the gateway. Never replay this POST to obtain a response. */
+    public static final class SubmissionUncertainException extends IOException {
+        SubmissionUncertainException(IOException cause) { super("submission_response_unavailable",cause); }
+    }
     public interface Transport { HttpURLConnection open(URL url) throws Exception; }
     public interface Guard { boolean allowed(); }
     public interface Trace { void event(String stage,int detail); }
@@ -28,8 +32,13 @@ public final class PortalHttpClient {
         check(); PortalProtocol.trusted(url.toString());
         trace.event(phase+".open",0);
         HttpURLConnection c=transport.open(url);
+        boolean payloadStarted=false;
         try {
             c.setConnectTimeout(5000); c.setReadTimeout(5000); c.setInstanceFollowRedirects(false);
+            // Release each gateway connection after its response, including both preparatory GETs.
+            // Keep fixed-length streaming for POST: buffering could permit implicit body replay.
+            c.setRequestProperty("Connection","close");
+            trace.event(phase+".connection_close",1);
             c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36");
             c.setRequestProperty("Accept", "text/html,application/xhtml+xml");
             for (Map.Entry<String,List<String>> h:cookies.get(url.toURI(),Collections.emptyMap()).entrySet())
@@ -42,7 +51,7 @@ public final class PortalHttpClient {
                 c.setRequestProperty("Content-Type","application/x-www-form-urlencoded");
                 byte[] data=body.getBytes(StandardCharsets.UTF_8); c.setFixedLengthStreamingMode(data.length);
                 trace.event(phase+".write_begin",0);
-                try (OutputStream out=c.getOutputStream()) { out.write(data); }
+                try (OutputStream out=c.getOutputStream()) { payloadStarted=true;out.write(data); }
                 trace.event(phase+".write_complete",0);
             }
             int code=c.getResponseCode();
@@ -60,6 +69,12 @@ public final class PortalHttpClient {
             }
             trace.event(phase+".body_bytes",bytes.size());
             return new Page(url,code,bytes.toString("UTF-8"),redirect);
+        } catch(IOException e) {
+            if(body!=null && payloadStarted) {
+                trace.event("submit.outcome_unknown",1);
+                throw new SubmissionUncertainException(e);
+            }
+            throw e;
         } finally { c.disconnect(); }
     }
     private Page get(URL u, URL referer,String phase) throws Exception {

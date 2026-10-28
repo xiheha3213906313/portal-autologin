@@ -1,14 +1,24 @@
-# 门户自动登录 0.4.1（实验静默模式与诊断日志）
+# 门户自动登录 0.4.2（实验静默模式与诊断日志）
 
 为用户已验证的访客门户编写的 LSPosed 传统 API 模块。测试目标：小米 14、Android 16、小米浏览器门户 Activity。
 
 ## 安装
 
-1. 安装 `portal-autologin-0.4.1.apk`。
+1. 安装 `portal-autologin-0.4.2.apk`。
 2. 在 LSPosed 中启用“门户自动登录”，作用域勾选“小米浏览器 / com.android.browser”。前台模式只需此作用域；实验静默模式还需勾选“系统框架 / android”并重启。已安装的 `com.android.captiveportallogin` 包不是本机实际宿主。
 3. 重启手机一次，打开模块配置应用，填写自己的账号密码，打开开关并保存。
 4. Wi-Fi 下次要求认证时打开系统登录通知，让登录页面留在前台。模块识别指定页面后自动逐字填写并点击 Login。
 5. 实验静默模式：同时开启“自动登录”和“静默登录”并保存。未登录 Wi-Fi 出现 CAPTIVE_PORTAL 能力时才尝试后台认证。已认证时不强制注销。
+
+## 0.4.2 提交后连接关闭兼容处理
+
+用户真机日志确认：两次 GET 均为 200，表单检查通过，POST 请求体写出，但读取响应时出现 IOException / EOFException，未收到 HTTP 状态码；稍后旧 Network 丢失、新 Network 验证通过，不能据此确认原请求认证成功。
+
+- 所有请求设置 `Connection: close`，让准备页面和提交请求各自结束连接，排查网关连接复用兼容问题。此原因仍属待真机验证的假设。
+- 保留固定长度流式 POST，不改为可重放的缓冲模式，不自动重新提交。
+- 当请求体开始写入后出现 I/O 异常，记为 `submit.outcome_unknown`，仅触发相同 Wi-Fi 的系统联网复测，保持原 45 秒验证期限；结果由 VALIDATED 回调决定。收到明确认证拒绝仍按失败处理。
+- 日志增加 `*.connection_close`、`submission.uncertain_waiting_validation` 和验证触发结果。不会把 EOF 当作成功或密码错误。
+- 新增两个回归测试，覆盖响应 EOF 后不重发，以及写入前 TLS 失败不被算作已发送。独立连接策略和系统复测效果仍需用户设备验证。
 
 ## 0.4.1 诊断日志
 
@@ -64,7 +74,7 @@
 ## 验证
 
 - `node tests/login.test.cjs`：模拟 DOM，验证逐字输入/失焦/单次点击、同源 iframe、冷却、额外条件及后台停止。
-- `./gradlew :app:testReleaseUnitTest`：10 个测试覆盖表单编码、隐藏值、RedirectUrl、同源限制、Cookie、单次提交与提交前取消，以及诊断开关、容量限制、异常脱敏和失败阶段定位。
+- `./gradlew :app:testReleaseUnitTest`：12 个测试覆盖表单编码、隐藏值、RedirectUrl、同源限制、Cookie、单次提交与提交前取消，以及诊断开关、容量限制、异常脱敏和失败阶段定位。
 - Java/Kotlin 编译、DEX 转换、Android Lint、APK 对齐与签名校验。
 - 0.1.0 已在用户设备验证；0.3.0 界面完成编译与 Android Lint 检查，未在真实手机上运行或截图验证。登录 JS 保持 0.2.0 的实现。
 

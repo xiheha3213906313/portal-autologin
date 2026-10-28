@@ -47,11 +47,11 @@ public class PortalProtocolTest {
         final ByteArrayOutputStream sent=new ByteArrayOutputStream();
         Fake(URL u,String html,int code){super(u);this.html=html;this.code=code;}
         public void connect(){} public void disconnect(){} public boolean usingProxy(){return false;}
-        public int getResponseCode(){return code;}
+        public int getResponseCode() throws IOException{return code;}
         public Map<String,List<String>> getHeaderFields(){return headers;}
         public String getHeaderField(String name){List<String> v=headers.get(name);return v==null?null:v.get(0);}
         public InputStream getInputStream(){return new ByteArrayInputStream(html.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
-        public OutputStream getOutputStream(){return sent;}
+        public OutputStream getOutputStream() throws IOException{return sent;}
     }
     @Test public void getsFreshPagesCarriesCookiesAndPostsOnlyOnce() throws Exception {
         List<Fake> seen=new ArrayList<>();
@@ -64,6 +64,7 @@ public class PortalProtocolTest {
         assertEquals(3,seen.size());assertEquals("POST",seen.get(2).getRequestMethod());
         assertTrue(seen.get(2).getRequestProperty("Cookie").contains("sid=fresh"));
         assertTrue(seen.get(2).sent.toString("UTF-8").contains("password=pw"));
+        for(Fake f:seen)assertEquals("close",f.getRequestProperty("Connection"));
     }
     @Test public void neverFollowsRedirectToOtherOriginOrPostsAfterCancellation() throws Exception {
         List<Fake> seen=new ArrayList<>();
@@ -85,5 +86,33 @@ public class PortalProtocolTest {
         assertTrue(log.contains("landing.http_status 200"));assertTrue(log.contains("landing.parse_frame 0"));
         String text=log.toString();assertFalse(text.contains("private-user"));assertFalse(text.contains("private-pass"));
         assertFalse(text.contains("https://"));assertFalse(text.contains("submit.write_begin"));
+    }
+    @Test public void postResponseEofIsUncertainAndNeverReplayed() throws Exception {
+        List<Fake> seen=new ArrayList<>();List<String> trace=new ArrayList<>();
+        try {
+            new PortalHttpClient(u->{
+                Fake f=seen.size()<2?new Fake(u,seen.isEmpty()?"<iframe id=leftFrame src=/login.html>":FORM,200):
+                    new Fake(u,"",200){@Override public int getResponseCode() throws IOException{throw new IOException("private-url",new EOFException("private-token"));}};
+                seen.add(f);return f;
+            },()->true,(s,n)->trace.add(s)).login("demo","pw");fail();
+        }catch(PortalHttpClient.SubmissionUncertainException expected) {
+            assertEquals("submission_response_unavailable",expected.getMessage());
+        }
+        assertEquals(3,seen.size());assertEquals("POST",seen.get(2).getRequestMethod());
+        assertTrue(seen.get(2).sent.size()>0);assertTrue(trace.contains("submit.write_complete"));
+        assertTrue(trace.contains("submit.outcome_unknown"));assertFalse(trace.contains("submit.http_status"));
+        assertFalse(trace.toString().contains("private-"));
+    }
+    @Test public void failureBeforeOpeningPostStreamIsNotReportedAsSent() throws Exception {
+        List<Fake> seen=new ArrayList<>();List<String> trace=new ArrayList<>();
+        try {
+            new PortalHttpClient(u->{
+                Fake f=seen.size()<2?new Fake(u,seen.isEmpty()?"<iframe id=leftFrame src=/login.html>":FORM,200):
+                    new Fake(u,"",200){@Override public OutputStream getOutputStream() throws IOException{throw new javax.net.ssl.SSLHandshakeException("private-cert-detail");}};
+                seen.add(f);return f;
+            },()->true,(s,n)->trace.add(s)).login("demo","pw");fail();
+        }catch(javax.net.ssl.SSLHandshakeException expected){}
+        assertEquals(3,seen.size());assertEquals(0,seen.get(2).sent.size());
+        assertFalse(trace.contains("submit.outcome_unknown"));
     }
 }

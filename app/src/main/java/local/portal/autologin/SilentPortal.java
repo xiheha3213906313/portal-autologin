@@ -151,14 +151,28 @@ public final class SilentPortal {
             new PortalHttpClient(url->(java.net.HttpURLConnection)n.openConnection(url),()->allowed(n,a),DiagnosticLog::event).login(c.user,c.pass);
             synchronized(attempts) {a.posted=true;}
             log("submitted_waiting_validation");
-            // Request a fresh system probe for this exact Wi-Fi, not the mobile network.
-            cm.reportNetworkConnectivity(n,true);
-            DiagnosticLog.event("validation.requested",0);
+            requestValidation(n,a);
+        } catch(PortalHttpClient.SubmissionUncertainException e) {
+            // A closed response is not an auth rejection. Check the same network without reposting.
+            DiagnosticLog.failure(e);
+            DiagnosticLog.event("submission.uncertain_waiting_validation",0);
+            requestValidation(n,a);
         } catch(Throwable e) {
             synchronized(attempts) {a.active=false;}
             log("fallback_"+e.getClass().getSimpleName());
             DiagnosticLog.failure(e);
         } finally {c.user=null;c.pass=null;}
+    }
+    @android.annotation.SuppressLint("MissingPermission") // Runs under the system_server UID.
+    private void requestValidation(Network n,Attempt a) {
+        synchronized(attempts) {if(attempts.get(n)!=a || !a.active)return;}
+        try {
+            cm.reportNetworkConnectivity(n,true);
+            DiagnosticLog.event("validation.requested",0);
+        } catch(Throwable e) {
+            synchronized(attempts) {a.active=false;}
+            DiagnosticLog.event("validation.request_failed",0);DiagnosticLog.failure(e);
+        }
     }
     private void hookPortalLaunch() {
         try {
