@@ -76,4 +76,14 @@ public class PortalProtocolTest {
         }catch(IllegalStateException expected){}
         assertEquals(2,seen.size());assertEquals(0,seen.get(1).sent.size());
     }
+    @Test public void traceIdentifiesFailedPhaseWithoutLeakingNetworkDetails() throws Exception {
+        List<String> log=new ArrayList<>();
+        try {
+            new PortalHttpClient(u->new Fake(u,"not a portal",200),()->true,(s,n)->log.add(s+" "+n)).login("private-user","private-pass");
+            fail();
+        } catch(IllegalArgumentException expected){}
+        assertTrue(log.contains("landing.http_status 200"));assertTrue(log.contains("landing.parse_frame 0"));
+        String text=log.toString();assertFalse(text.contains("private-user"));assertFalse(text.contains("private-pass"));
+        assertFalse(text.contains("https://"));assertFalse(text.contains("submit.write_begin"));
+    }
 }

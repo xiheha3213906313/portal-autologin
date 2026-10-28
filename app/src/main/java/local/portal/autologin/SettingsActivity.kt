@@ -2,6 +2,7 @@ package local.portal.autologin
 
 import android.content.Context
 import android.content.Intent
+import android.content.BroadcastReceiver
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.WindowManager
@@ -9,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +33,21 @@ import top.yukonga.miuix.kmp.extra.SuperSwitch
 import top.yukonga.miuix.kmp.theme.*
 
 class SettingsActivity : ComponentActivity() {
+    private var pendingLog: String? = null
+    private val exportLog = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val text = pendingLog
+        pendingLog = null
+        if (uri != null && text != null) {
+            Thread {
+                val ok = runCatching {
+                    val stream = contentResolver.openOutputStream(uri) ?: error("No output")
+                    stream.bufferedWriter(Charsets.UTF_8).use { it.write(text) }
+                }.isSuccess
+                runOnUiThread { Toast.makeText(this, if (ok) "日志已导出" else "导出失败", Toast.LENGTH_SHORT).show() }
+            }.start()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -53,6 +70,7 @@ class SettingsActivity : ComponentActivity() {
         var enabled by remember { mutableStateOf(prefs?.getBoolean("enabled", false) ?: false) }
         var fast by remember { mutableStateOf(prefs?.getBoolean("fast", true) ?: true) }
         var silent by remember { mutableStateOf(prefs?.getBoolean("silent", false) ?: false) }
+        var debugLog by remember { mutableStateOf(prefs?.getBoolean("debug_log", false) ?: false) }
         var showPassword by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         val confirmClear = remember { mutableStateOf(false) }
@@ -125,6 +143,25 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = "保存", onClick = { save() }, enabled = usable,
                     modifier = Modifier.fillMaxWidth(), minHeight = 54.dp,
                     colors = ButtonDefaults.textButtonColorsPrimary())
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    SuperSwitch(title = "诊断日志", checked = debugLog, enabled = usable,
+                        summary = if (debugLog) "即时生效，复现问题后导出" else null,
+                        onCheckedChange = { value ->
+                            if (prefs?.edit()?.putBoolean("debug_log", value)?.commit() == true) {
+                                debugLog = value
+                                sendBroadcast(Intent(SilentPortal.LOG_CONFIG).setPackage("android"))
+                            } else error = "日志设置保存失败"
+                        })
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(text = "导出日志", onClick = { requestLogExport() }, enabled = usable,
+                            modifier = Modifier.weight(1f), minHeight = 48.dp,
+                            colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
+                        TextButton(text = "清空日志", onClick = { clearLogs() }, enabled = usable,
+                            modifier = Modifier.weight(1f), minHeight = 48.dp,
+                            colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
+                    }
+                }
                 TextButton(text = "清除账号", onClick = { focus.clearFocus(); confirmClear.value = true },
                     enabled = usable, modifier = Modifier.align(Alignment.CenterHorizontally),
                     minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
@@ -137,7 +174,7 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = "清除", modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.textButtonColorsPrimary(), onClick = {
                         if (prefs?.edit()?.clear()?.commit() == true) {
-                            username = ""; password = ""; enabled = false; fast = true; silent = false
+                            username = ""; password = ""; enabled = false; fast = true; silent = false; debugLog = false
                             notifyConfigChanged()
                             showPassword = false; error = null
                             confirmClear.value = false
@@ -151,5 +188,28 @@ class SettingsActivity : ComponentActivity() {
     }
     private fun notifyConfigChanged() {
         sendBroadcast(Intent(SilentPortal.ACTION).setPackage("android"))
+    }
+    private fun requestLogExport() {
+        sendOrderedBroadcast(Intent(SilentPortal.LOG_EXPORT).setPackage("android"), null,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (isFinishing || isDestroyed) return
+                    if (resultCode != -1 || resultData == null) {
+                        Toast.makeText(this@SettingsActivity, "系统日志未连接，请检查系统框架作用域并重启", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    pendingLog = resultData
+                    exportLog.launch("portal-debug-${System.currentTimeMillis()}.txt")
+                }
+            }, null, 0, null, null)
+    }
+    private fun clearLogs() {
+        sendOrderedBroadcast(Intent(SilentPortal.LOG_CLEAR).setPackage("android"), null,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    Toast.makeText(this@SettingsActivity,
+                        if (resultCode == -1) "日志已清空" else "系统日志未连接，请重启后重试", Toast.LENGTH_SHORT).show()
+                }
+            }, null, 0, null, null)
     }
 }
