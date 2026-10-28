@@ -142,7 +142,6 @@ class SettingsActivity : ComponentActivity() {
                             })
                     }
                 }
-                Spacer(Modifier.height(4.dp))
                 TextButton(text = "保存", onClick = { save() }, enabled = usable,
                     modifier = Modifier.fillMaxWidth(), minHeight = 54.dp,
                     colors = ButtonDefaults.textButtonColorsPrimary())
