@@ -22,7 +22,7 @@ public class PortalProtocolTest {
         String b=body(FORM);
         assertTrue(b.contains("username=demo")); assertTrue(b.contains("password=a+%2B%26%E5%AF%86"));
         assertTrue(b.contains("RedirectUrl=original%26value")); assertTrue(b.contains("anonymous=0"));
-        assertFalse(b.contains("checkbox="));assertFalse(b.contains("Login="));
+        assertTrue(b.contains("checkbox=on"));assertTrue(b.contains("checkbox1=on"));assertFalse(b.contains("Login="));
     }
     @Test public void matchesSetRedirectUrlWithoutDecoding() throws Exception {
         String b=PortalProtocol.body(FORM,new URL(ROOT+"/login.html"),new URL(ROOT+"/index.html?RedirectUrl=http%3A%2F%2Fexample.org"),"demo","pw");
@@ -64,7 +64,12 @@ public class PortalProtocolTest {
         assertEquals(3,seen.size());assertEquals("POST",seen.get(2).getRequestMethod());
         assertTrue(seen.get(2).getRequestProperty("Cookie").contains("sid=fresh"));
         assertTrue(seen.get(2).sent.toString("UTF-8").contains("password=pw"));
-        for(Fake f:seen)assertEquals("close",f.getRequestProperty("Connection"));
+        for(Fake f:seen)assertEquals("keep-alive",f.getRequestProperty("Connection"));
+        assertEquals("same-origin",seen.get(2).getRequestProperty("Sec-Fetch-Site"));
+        assertEquals("navigate",seen.get(2).getRequestProperty("Sec-Fetch-Mode"));
+        assertEquals("document",seen.get(2).getRequestProperty("Sec-Fetch-Dest"));
+        assertTrue(seen.get(2).getRequestProperty("User-Agent").contains("Chrome/135.0.7049.79"));
+        assertEquals("?1",seen.get(2).getRequestProperty("sec-ch-ua-mobile"));
     }
     @Test public void neverFollowsRedirectToOtherOriginOrPostsAfterCancellation() throws Exception {
         List<Fake> seen=new ArrayList<>();
@@ -114,5 +119,26 @@ public class PortalProtocolTest {
         }catch(javax.net.ssl.SSLHandshakeException expected){}
         assertEquals(3,seen.size());assertEquals(0,seen.get(2).sent.size());
         assertFalse(trace.contains("submit.outcome_unknown"));
+    }
+    @Test public void hiddenFlagsUseFreshPageValuesButVisibleTermsAreNeverAccepted() throws Exception {
+        String html=FORM.replace("name=checkbox>","name=checkbox value=flag-a>").replace("name=checkbox1>","name=checkbox1 value=flag-b>");
+        String b=body(html);assertTrue(b.contains("checkbox=flag-a"));assertTrue(b.contains("checkbox1=flag-b"));
+        String visible=html.replace("type=password name=accesscode","style='display:none' type=password name=accesscode")
+            .replace("display: none","display:block");
+        for(String form:Arrays.asList(visible,visible.replace("type=checkbox","type=checkbox checked"))) {
+            try {body(form);fail();}
+            catch(IllegalArgumentException expected){assertEquals("manual_checkbox",expected.getMessage());}
+        }
+    }
+    @Test public void traceContainsOnlyCookieCountsAndHiddenFieldPresence() throws Exception {
+        List<Fake> seen=new ArrayList<>();List<String> trace=new ArrayList<>();
+        new PortalHttpClient(u->{
+            Fake f=new Fake(u,seen.isEmpty()?"<iframe id=leftFrame src=/login.html>":seen.size()==1?FORM:"Authentication Success",200);
+            if(seen.isEmpty())f.headers.put("Set-Cookie",Arrays.asList("sid=PRIVATE_COOKIE; Path=/; Secure"));
+            seen.add(f);return f;
+        },()->true,(s,n)->trace.add(s+" "+n)).login("private-user","private-password");
+        assertTrue(trace.contains("submit.cookie_count 1"));assertTrue(trace.contains("form.field.checkbox 1"));
+        assertTrue(trace.contains("form.field.checkbox1 1"));assertTrue(trace.contains("form.field.accesscode 0"));
+        assertFalse(trace.toString().contains("PRIVATE_COOKIE"));assertFalse(trace.toString().contains("private-password"));
     }
 }

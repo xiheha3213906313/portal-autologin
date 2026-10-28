@@ -19,6 +19,9 @@ public final class PortalHttpClient {
     private final Trace trace;
     private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER);
     private final long deadline = System.nanoTime() + 30000000000L;
+    // Taken from the user's successful Xiaomi Browser request. No cookies or credentials embedded.
+    private static final String USER_AGENT="Mozilla/5.0 (Linux; Android 16; 23127PN0CC Build/BP2A.250605.031.A3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.7049.79 Mobile Safari/537.36";
+    private static final String ACCEPT="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
     public PortalHttpClient(Transport transport, Guard guard) { this(transport,guard,(stage,detail)->{}); }
     public PortalHttpClient(Transport transport,Guard guard,Trace trace) { this.transport=transport;this.guard=guard;this.trace=trace; }
     private void check() {
@@ -35,20 +38,34 @@ public final class PortalHttpClient {
         boolean payloadStarted=false;
         try {
             c.setConnectTimeout(5000); c.setReadTimeout(5000); c.setInstanceFollowRedirects(false);
-            // Release each gateway connection after its response, including both preparatory GETs.
-            // Keep fixed-length streaming for POST: buffering could permit implicit body replay.
-            c.setRequestProperty("Connection","close");
-            trace.event(phase+".connection_close",1);
-            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36");
-            c.setRequestProperty("Accept", "text/html,application/xhtml+xml");
-            for (Map.Entry<String,List<String>> h:cookies.get(url.toURI(),Collections.emptyMap()).entrySet())
+            // Match the observed successful browser request, retaining streaming/no application retry.
+            c.setRequestProperty("Connection","keep-alive");
+            trace.event(phase+".browser_profile",1);
+            c.setRequestProperty("User-Agent",USER_AGENT);
+            c.setRequestProperty("Accept",ACCEPT);
+            c.setRequestProperty("Accept-Language","zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7");
+            c.setRequestProperty("Upgrade-Insecure-Requests","1");
+            c.setRequestProperty("sec-ch-ua","\"XiaoMiBrowser\";v=\"135\", \"Not-A.Brand\";v=\"8\", \"Chromium\";v=\"135\"");
+            c.setRequestProperty("sec-ch-ua-mobile","?1");
+            c.setRequestProperty("sec-ch-ua-platform","\"Android\"");
+            int cookieCount=0;
+            for (Map.Entry<String,List<String>> h:cookies.get(url.toURI(),Collections.emptyMap()).entrySet()) {
                 c.setRequestProperty(h.getKey(),String.join("; ",h.getValue()));
+                if (h.getKey().equalsIgnoreCase("Cookie")) for(String value:h.getValue()) for(String part:value.split(";"))
+                    if(part.contains("=") && !part.trim().startsWith("$"))cookieCount++;
+            }
+            trace.event(phase+".cookie_count",cookieCount);
+            trace.event(phase+".cookie_v1",cookies.getCookieStore().getCookies().stream().anyMatch(k->k.getVersion()>0)?1:0);
             if (referer != null) c.setRequestProperty("Referer",referer.toString());
             if (body != null) {
                 check();
                 c.setRequestMethod("POST"); c.setDoOutput(true);
                 c.setRequestProperty("Origin",PortalProtocol.ORIGIN);
                 c.setRequestProperty("Content-Type","application/x-www-form-urlencoded");
+                c.setRequestProperty("Cache-Control","max-age=0");
+                c.setRequestProperty("Sec-Fetch-Dest","document");
+                c.setRequestProperty("Sec-Fetch-Mode","navigate");
+                c.setRequestProperty("Sec-Fetch-Site","same-origin");
                 byte[] data=body.getBytes(StandardCharsets.UTF_8); c.setFixedLengthStreamingMode(data.length);
                 trace.event(phase+".write_begin",0);
                 try (OutputStream out=c.getOutputStream()) { payloadStarted=true;out.write(data); }
@@ -99,6 +116,11 @@ public final class PortalHttpClient {
             if (!"/login.html".equals(page.url.getPath())) throw new IOException("unexpected_login_page");
             trace.event("form.parse_begin",0);
             String encoded=PortalProtocol.body(page.body,page.url,landing.url,user,pass);
+            for(String name:Arrays.asList("RedirectUrl","anonymous","anonymousurl","accesscode","accesscode1","checkbox","checkbox1")) {
+                int status=-1;
+                for(String part:encoded.split("&")) if(part.startsWith(name+"=")) {status=part.length()>name.length()+1?1:0;break;}
+                trace.event("form.field."+name.toLowerCase(Locale.ROOT),status);
+            }
             trace.event("form.ready",0);
             check();
             Page result=request(new URL(PortalProtocol.ORIGIN+"/login"),encoded,page.url,"submit");

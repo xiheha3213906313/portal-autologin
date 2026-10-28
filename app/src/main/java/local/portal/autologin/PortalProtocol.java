@@ -60,7 +60,10 @@ public final class PortalProtocol {
             if (!FIELDS.contains(name) || values.containsKey(name)) throw new IllegalArgumentException("changed_fields");
             if (type.equals("checkbox") || type.equals("radio")) {
                 if (!hidden(input)) throw new IllegalArgumentException("manual_checkbox");
-                if (!input.hasAttr("checked")) continue;
+                // The successful browser POST includes both hidden portal flags. Runtime page
+                // initialization can check them even when the original HTML has no checked attr.
+                boolean portalFlag=type.equals("checkbox") && (name.equals("checkbox") || name.equals("checkbox1"));
+                if (!input.hasAttr("checked") && !portalFlag) continue;
             }
             if (name.equals("accesscode") && !hidden(input)) throw new IllegalArgumentException("manual_accesscode");
             values.put(name, input.hasAttr("value") ? input.attr("value") : type.equals("checkbox") ? "on" : "");
