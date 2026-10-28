@@ -1,0 +1,4 @@
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_portal_artwork"
+    android:insetLeft="9.26%" android:insetTop="9.26%"
+    android:insetRight="9.26%" android:insetBottom="9.26%" />

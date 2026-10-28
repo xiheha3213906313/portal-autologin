@@ -93,7 +93,10 @@ class SettingsActivity : ComponentActivity() {
                 } else error = "保存失败，请重试"
             }
         }
-        Scaffold(topBar = { TopAppBar(title = "门户登录", largeTitle = "门户登录") }) { padding ->
+        Scaffold(topBar = {
+            TopAppBar(title = "门户登录", largeTitle = "门户登录",
+                modifier = Modifier.offset(y = (-12).dp))
+        }) { padding ->
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
                     .imePadding().verticalScroll(rememberScrollState())
