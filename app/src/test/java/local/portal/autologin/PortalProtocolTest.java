@@ -119,6 +119,7 @@ public class PortalProtocolTest {
         }catch(javax.net.ssl.SSLHandshakeException expected){}
         assertEquals(3,seen.size());assertEquals(0,seen.get(2).sent.size());
         assertFalse(trace.contains("submit.outcome_unknown"));
+        assertFalse(trace.contains("submit.write_complete"));
     }
     @Test public void hiddenFlagsUseFreshPageValuesButVisibleTermsAreNeverAccepted() throws Exception {
         String html=FORM.replace("name=checkbox>","name=checkbox value=flag-a>").replace("name=checkbox1>","name=checkbox1 value=flag-b>");

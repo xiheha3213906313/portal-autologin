@@ -15,11 +15,14 @@ public final class SilentPortal {
     public static final String LOG_CONFIG="local.portal.autologin.LOG_CONFIG";
     public static final String LOG_EXPORT="local.portal.autologin.LOG_EXPORT";
     public static final String LOG_CLEAR="local.portal.autologin.LOG_CLEAR";
+    private static final String APP_BEGIN="local.portal.autologin.APP_LOGIN_BEGIN";
+    private static final String APP_END="local.portal.autologin.APP_LOGIN_END";
     private static final String MODULE="local.portal.autologin";
     private static SilentPortal instance;
     private final ConnectivityManager cm;
     private final Handler handler;
     private int launchHookCount=-1;
+    private long applicationLeaseUntil;
     private final LinkedHashMap<Network,Attempt> attempts=new LinkedHashMap<>();
     private final ExecutorService worker=new ThreadPoolExecutor(0,1,30,TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(2),r->{Thread t=new Thread(r,"PortalAuth");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -57,9 +60,39 @@ public final class SilentPortal {
     private void register(Context context) {
         IntentFilter filter=new IntentFilter(ACTION);
         filter.addAction(LOG_CONFIG);filter.addAction(LOG_EXPORT);filter.addAction(LOG_CLEAR);
+        filter.addAction(APP_BEGIN);filter.addAction(APP_END);
         context.registerReceiver(new BroadcastReceiver() {
             @Override public void onReceive(Context c,Intent i) {
                 config();
+                if(APP_BEGIN.equals(i.getAction())) {
+                    synchronized(attempts) {
+                        Network requested=(Network)i.getParcelableExtra("network");
+                        Attempt previous=attempts.get(requested);
+                        if(previous!=null && previous.posted &&
+                            SystemClock.elapsedRealtime()-previous.start<300000) {
+                            setResultCode(11);return;
+                        }
+                        // A POST already started must finish; the app only waits for validation.
+                        for(Attempt a:attempts.values()) if(a.active && a.posted) {
+                            setResultCode(11);return;
+                        }
+                        applicationLeaseUntil=SystemClock.elapsedRealtime()+60000;
+                        for(Attempt a:attempts.values()) a.active=false;
+                    }
+                    DiagnosticLog.event("app.claim_granted",0);setResultCode(10);return;
+                }
+                if(APP_END.equals(i.getAction())) {
+                    synchronized(attempts) {
+                        applicationLeaseUntil=0;
+                        Network n=(Network)i.getParcelableExtra("network");
+                        if(n!=null) {
+                            Attempt a=new Attempt();a.active=false;a.posted=i.getBooleanExtra("submitted",false);
+                            attempts.put(n,a);
+                            if(attempts.size()>16) attempts.remove(attempts.keySet().iterator().next());
+                        }
+                    }
+                    DiagnosticLog.event("app.claim_released",0);return;
+                }
                 if(LOG_EXPORT.equals(i.getAction())) {
                     setResultCode(-1);
                     synchronized(attempts) {
@@ -71,8 +104,13 @@ public final class SilentPortal {
                 if(LOG_CONFIG.equals(i.getAction())) {DiagnosticLog.event("config.log_updated",0);return;}
                 DiagnosticLog.event("config.saved",0);
                 synchronized(attempts) {
-                    for (Attempt a:attempts.values()) a.active=false;
-                    attempts.clear();
+                    Iterator<Attempt> it=attempts.values().iterator();
+                    while(it.hasNext()) {
+                        Attempt a=it.next();
+                        // Changing/saving configuration must not hide an already-started POST.
+                        if(a.active && a.posted) continue;
+                        a.active=false;it.remove();
+                    }
                 }
                 scan();
             }
@@ -120,6 +158,7 @@ public final class SilentPortal {
         if (!c.enabled) {DiagnosticLog.event("attempt.disabled_or_missing_config",0);return false;}
         final Attempt a;
         synchronized(attempts) {
+            if(SystemClock.elapsedRealtime()<applicationLeaseUntil) return true;
             Attempt previous=attempts.get(n);
             long now=SystemClock.elapsedRealtime();
             if(previous!=null && now-previous.start<300000) {
@@ -148,7 +187,14 @@ public final class SilentPortal {
     private void authenticate(Network n,Attempt a,Config c) {
         log("attempt_started");
         try {
-            new PortalHttpClient(url->(java.net.HttpURLConnection)n.openConnection(url),()->allowed(n,a),DiagnosticLog::event).login(c.user,c.pass);
+            new PortalHttpClient(url->(java.net.HttpURLConnection)n.openConnection(url),()->allowed(n,a),(stage,detail)->{
+                DiagnosticLog.event(stage,detail);
+                if("submit.write_begin".equals(stage)) synchronized(attempts) {
+                    if(!a.active || SystemClock.elapsedRealtime()<applicationLeaseUntil)
+                        throw new IllegalStateException("attempt_cancelled");
+                    a.posted=true;
+                }
+            }).login(c.user,c.pass);
             synchronized(attempts) {a.posted=true;}
             log("submitted_waiting_validation");
             requestValidation(n,a);
@@ -158,7 +204,11 @@ public final class SilentPortal {
             DiagnosticLog.event("submission.uncertain_waiting_validation",0);
             requestValidation(n,a);
         } catch(Throwable e) {
-            synchronized(attempts) {a.active=false;}
+            synchronized(attempts) {
+                a.active=false;
+                if("login_form_returned".equals(e.getMessage()) || "authentication_rejected".equals(e.getMessage()))
+                    a.posted=false;
+            }
             log("fallback_"+e.getClass().getSimpleName());
             DiagnosticLog.failure(e);
         } finally {c.user=null;c.pass=null;}

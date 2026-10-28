@@ -5,11 +5,13 @@ import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -33,6 +35,10 @@ import top.yukonga.miuix.kmp.extra.SuperSwitch
 import top.yukonga.miuix.kmp.theme.*
 
 class SettingsActivity : ComponentActivity() {
+    private lateinit var prefs: SharedPreferences
+    private lateinit var login: AppLoginController
+    private var moduleAvailable = false
+    private var showSettings by mutableStateOf(false)
     private var pendingLog: String? = null
     private val exportLog = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         val text = pendingLog
@@ -53,34 +59,54 @@ class SettingsActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         @Suppress("DEPRECATION")
-        val prefs = try {
-            getSharedPreferences("portal", Context.MODE_WORLD_READABLE)
-        } catch (_: SecurityException) { null }
+        prefs = try {
+            getSharedPreferences("portal", Context.MODE_WORLD_READABLE).also { moduleAvailable = true }
+        } catch (_: SecurityException) { getSharedPreferences("portal", Context.MODE_PRIVATE) }
+        login = AppLoginController.get(this)
         setContent {
             MiuixTheme(colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                SettingsPage(prefs)
+                val state = login.state
+                if (showSettings || state.stage == AppLoginController.Stage.CONFIGURATION) {
+                    BackHandler(enabled = showSettings) { showSettings = false }
+                    SettingsPage(prefs)
+                } else {
+                    LoginResultPage(state, login,
+                        onSettings = { showSettings = true },
+                        onRetry = { login.retry() },
+                        onWifi = {
+                            val action = if (android.os.Build.VERSION.SDK_INT >= 29)
+                                Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
+                            runCatching { startActivity(Intent(action)) }
+                        })
+                }
             }
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        login.enterForeground(prefs, moduleAvailable)
+    }
+    override fun onPause() {
+        login.leaveForeground()
+        super.onPause()
+    }
+
     @Composable
-    private fun SettingsPage(prefs: SharedPreferences?) {
-        var username by remember { mutableStateOf(prefs?.getString("username", "") ?: "") }
-        var password by remember { mutableStateOf(prefs?.getString("password", "") ?: "") }
-        var enabled by remember { mutableStateOf(prefs?.getBoolean("enabled", false) ?: false) }
-        var fast by remember { mutableStateOf(prefs?.getBoolean("fast", true) ?: true) }
-        var silent by remember { mutableStateOf(prefs?.getBoolean("silent", false) ?: false) }
-        var debugLog by remember { mutableStateOf(prefs?.getBoolean("debug_log", false) ?: false) }
+    private fun SettingsPage(prefs: SharedPreferences) {
+        var username by remember { mutableStateOf(prefs.getString("username", "") ?: "") }
+        var password by remember { mutableStateOf(prefs.getString("password", "") ?: "") }
+        var enabled by remember { mutableStateOf(prefs.getBoolean("enabled", false)) }
+        var fast by remember { mutableStateOf(prefs.getBoolean("fast", true)) }
+        var silent by remember { mutableStateOf(prefs.getBoolean("silent", false)) }
+        var debugLog by remember { mutableStateOf(prefs.getBoolean("debug_log", false)) }
         var showPassword by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         val confirmClear = remember { mutableStateOf(false) }
         val focus = LocalFocusManager.current
-        val usable = prefs != null
-        val loginOptionsEnabled = usable && enabled
+        val loginOptionsEnabled = enabled
         val save = {
-            if (prefs == null) {
-                error = "请先在 LSPosed 启用模块"
-            } else if (enabled && (username.isBlank() || password.isEmpty())) {
+            if (username.isBlank() || password.isEmpty()) {
                 error = "请输入账号和密码"
             } else {
                 val ok = prefs.edit().putString("username", username.trim())
@@ -90,7 +116,8 @@ class SettingsActivity : ComponentActivity() {
                     notifyConfigChanged()
                     error = null
                     focus.clearFocus()
-                    Toast.makeText(this@SettingsActivity, "已保存", Toast.LENGTH_SHORT).show()
+                    showSettings = false
+                    login.saved()
                 } else error = "保存失败，请重试"
             }
         }
@@ -104,13 +131,13 @@ class SettingsActivity : ComponentActivity() {
                     .padding(horizontal = 20.dp).padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                if (!usable || error != null) {
+                if (error != null) {
                     Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
-                        Text(error ?: "请先在 LSPosed 启用模块，再重新打开此应用")
+                        Text(error ?: "")
                     }
                 }
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    SuperSwitch(title = "自动登录", checked = enabled, enabled = usable,
+                if (moduleAvailable) Card(modifier = Modifier.fillMaxWidth()) {
+                    SuperSwitch(title = "自动登录", checked = enabled,
                         onCheckedChange = { enabled = it })
                     SuperSwitch(title = "快速填写", checked = fast, enabled = loginOptionsEnabled,
                         onCheckedChange = { fast = it })
@@ -121,7 +148,7 @@ class SettingsActivity : ComponentActivity() {
                 Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(16.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         TextField(value = username, onValueChange = { username = it; error = null },
-                            label = "账号", singleLine = true, enabled = usable,
+                            label = "账号", singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false,
                                 keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
@@ -129,7 +156,7 @@ class SettingsActivity : ComponentActivity() {
                                 focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
                             }))
                         TextField(value = password, onValueChange = { password = it; error = null },
-                            label = "密码", singleLine = true, enabled = usable,
+                            label = "密码", singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false,
@@ -137,36 +164,37 @@ class SettingsActivity : ComponentActivity() {
                             keyboardActions = KeyboardActions(onDone = { save() }),
                             trailingIcon = {
                                 TextButton(text = if (showPassword) "隐藏" else "显示",
-                                    enabled = usable, onClick = { showPassword = !showPassword },
+                                    onClick = { showPassword = !showPassword },
                                     colors = ButtonDefaults.textButtonColors(color = Color.Transparent),
                                     minHeight = 48.dp, insideMargin = PaddingValues(horizontal = 12.dp))
                             })
                     }
                 }
-                TextButton(text = "保存", onClick = { save() }, enabled = usable,
+                TextButton(text = "保存", onClick = { save() },
                     modifier = Modifier.fillMaxWidth(), minHeight = 54.dp,
                     colors = ButtonDefaults.textButtonColorsPrimary())
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    SuperSwitch(title = "诊断日志", checked = debugLog, enabled = usable,
+                    SuperSwitch(title = "诊断日志", checked = debugLog,
                         summary = if (debugLog) "即时生效，复现问题后导出" else null,
                         onCheckedChange = { value ->
-                            if (prefs?.edit()?.putBoolean("debug_log", value)?.commit() == true) {
+                            if (prefs.edit().putBoolean("debug_log", value).commit()) {
                                 debugLog = value
+                                DiagnosticLog.setEnabled(value)
                                 sendBroadcast(Intent(SilentPortal.LOG_CONFIG).setPackage("android"))
                             } else error = "日志设置保存失败"
                         })
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(text = "导出日志", onClick = { requestLogExport() }, enabled = usable,
+                        TextButton(text = "导出日志", onClick = { requestLogExport() },
                             modifier = Modifier.weight(1f), minHeight = 48.dp,
                             colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
-                        TextButton(text = "清空日志", onClick = { clearLogs() }, enabled = usable,
+                        TextButton(text = "清空日志", onClick = { clearLogs() },
                             modifier = Modifier.weight(1f), minHeight = 48.dp,
                             colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
                     }
                 }
                 TextButton(text = "清除账号", onClick = { focus.clearFocus(); confirmClear.value = true },
-                    enabled = usable, modifier = Modifier.align(Alignment.CenterHorizontally),
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
                     minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
             }
         }
@@ -176,9 +204,12 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = "取消", onClick = { confirmClear.value = false }, modifier = Modifier.weight(1f))
                 TextButton(text = "清除", modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.textButtonColorsPrimary(), onClick = {
-                        if (prefs?.edit()?.clear()?.commit() == true) {
+                        if (prefs.edit().clear().commit()) {
                             username = ""; password = ""; enabled = false; fast = true; silent = false; debugLog = false
                             notifyConfigChanged()
+                            DiagnosticLog.setEnabled(false)
+                            login.clear()
+                            showSettings = false
                             showPassword = false; error = null
                             confirmClear.value = false
                             Toast.makeText(this@SettingsActivity, "已清除", Toast.LENGTH_SHORT).show()
@@ -197,21 +228,18 @@ class SettingsActivity : ComponentActivity() {
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
                     if (isFinishing || isDestroyed) return
-                    if (resultCode != -1 || resultData == null) {
-                        Toast.makeText(this@SettingsActivity, "系统日志未连接，请检查系统框架作用域并重启", Toast.LENGTH_LONG).show()
-                        return
-                    }
-                    pendingLog = resultData
+                    pendingLog = "Application\n" + DiagnosticLog.snapshot() +
+                        if (resultCode == -1 && resultData != null) "\nSystem module\n" + resultData else ""
                     exportLog.launch("portal-debug-${System.currentTimeMillis()}.txt")
                 }
             }, null, 0, null, null)
     }
     private fun clearLogs() {
+        DiagnosticLog.clear()
         sendOrderedBroadcast(Intent(SilentPortal.LOG_CLEAR).setPackage("android"), null,
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
-                    Toast.makeText(this@SettingsActivity,
-                        if (resultCode == -1) "日志已清空" else "系统日志未连接，请重启后重试", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@SettingsActivity, "日志已清空", Toast.LENGTH_SHORT).show()
                 }
             }, null, 0, null, null)
     }
