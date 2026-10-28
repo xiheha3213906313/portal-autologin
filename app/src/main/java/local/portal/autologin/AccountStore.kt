@@ -7,8 +7,8 @@ import java.io.FileNotFoundException
 
 /** History stays separate from the active account shared with LSPosed. */
 internal class AccountStore(context: Context, active: SharedPreferences) {
-    private val storage = context.applicationContext.getSharedPreferences("saved_accounts", Context.MODE_PRIVATE)
-    var initializationFailed = false
+    private val storage = UnifiedPreferences.open(context,"saved_accounts")
+    var initializationFailed = storage.initializationFailed
         private set
     val accounts: List<SavedAccountBook.Account> get() = read().accounts
 

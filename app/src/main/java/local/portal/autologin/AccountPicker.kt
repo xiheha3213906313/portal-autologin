@@ -42,19 +42,22 @@ internal fun AccountPicker(show: MutableState<Boolean>, accounts: List<SavedAcco
         ListPopup(show = show, onDismissRequest = { pendingDelete = null; show.value = false }, maxHeight = 300.dp,
             enableWindowDim = false) {
             ListPopupColumn {
+                Text("使用其他账号", fontSize = 14.sp, color = MiuixTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { pendingDelete = null; onNew() }
+                        .padding(horizontal = 14.dp, vertical = 12.dp))
                 if (accounts.isEmpty()) {
                     Text("暂无保存账号", fontSize = 14.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         modifier = Modifier.padding(16.dp))
                 }
-                accounts.forEach { account ->
+                accounts.sortedBy { it.bundled }.forEach { account ->
                     key(account.username) {
                     Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { pendingDelete = null; onSelect(account) }
                         .padding(start = 14.dp, end = 6.dp).heightIn(min = 44.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text(account.displayName(), fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).padding(vertical = 8.dp))
-                        Box(Modifier.width(64.dp).height(40.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.width(64.dp).height(40.dp), contentAlignment = Alignment.CenterEnd) {
                         if (account.bundled) {
                             Text("预设", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 modifier = Modifier.padding(horizontal = 4.dp))
@@ -82,9 +85,7 @@ internal fun AccountPicker(show: MutableState<Boolean>, accounts: List<SavedAcco
                     }
                     }
                 }
-                Text("使用其他账号", fontSize = 14.sp, color = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { pendingDelete = null; onNew() }
-                        .padding(horizontal = 14.dp, vertical = 12.dp))
+
             }
         }
     }

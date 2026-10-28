@@ -29,7 +29,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController,
+fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController, moduleActive: Boolean,
                     onSettings: () -> Unit, onRetry: () -> Unit, onWifi: () -> Unit) {
     val success = state.stage == AppLoginController.Stage.SUCCESS
     val connecting = state.stage == AppLoginController.Stage.CONNECTING
@@ -60,9 +60,13 @@ fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController
                 }
             }
         }
-        TextButton(text = "设置", onClick = onSettings,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
-            minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
+        Column(Modifier.align(Alignment.BottomCenter).padding(horizontal = 20.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            TextButton(text = "设置", onClick = onSettings,
+                minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
+            if (!moduleActive) Text("LSPosed 未启动，启用后可使用完整功能", fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        }
     }
 }
 

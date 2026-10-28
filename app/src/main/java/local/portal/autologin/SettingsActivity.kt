@@ -42,6 +42,7 @@ import top.yukonga.miuix.kmp.extra.SuperDialog
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import top.yukonga.miuix.kmp.theme.*
 import java.io.File
+import kotlinx.coroutines.delay
 
 class SettingsActivity : ComponentActivity() {
     private lateinit var prefs: SharedPreferences
@@ -77,9 +78,12 @@ class SettingsActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         @Suppress("DEPRECATION")
-        prefs = try {
-            getSharedPreferences("portal", Context.MODE_WORLD_READABLE).also { moduleAvailable = true }
-        } catch (_: SecurityException) { getSharedPreferences("portal", Context.MODE_PRIVATE) }
+        val preferenceMode = try {
+            getSharedPreferences("portal", Context.MODE_WORLD_READABLE)
+            moduleAvailable = true
+            Context.MODE_WORLD_READABLE
+        } catch (_: SecurityException) { Context.MODE_PRIVATE }
+        prefs = UnifiedPreferences.open(this,"portal",preferenceMode)
         accountStore = AccountStore(this, prefs)
         login = AppLoginController.get(this)
         setContent {
@@ -102,7 +106,7 @@ class SettingsActivity : ComponentActivity() {
                     BackHandler(enabled = showSettings) { showSettings = false }
                     SettingsPage(prefs, updates, showUpdate, version)
                 } else {
-                    LoginResultPage(state, login,
+                    LoginResultPage(state, login, moduleAvailable,
                         onSettings = { showSettings = true },
                         onRetry = { login.retry() },
                         onWifi = {
@@ -138,7 +142,9 @@ class SettingsActivity : ComponentActivity() {
         var silent by remember { mutableStateOf(prefs.getBoolean("silent", false)) }
         var debugLog by remember { mutableStateOf(prefs.getBoolean("debug_log", false)) }
         var showPassword by remember { mutableStateOf(false) }
-        var error by remember { mutableStateOf<String?>(if (accountStore.initializationFailed) "账号列表读取失败，请重试" else null) }
+        var error by remember { mutableStateOf<String?>(if (accountStore.initializationFailed ||
+            (prefs as? UnifiedPreferences)?.initializationFailed == true) "配置读取失败，请重试" else null) }
+        var savedOnline by remember { mutableStateOf(false) }
         var savedAccounts by remember { mutableStateOf(accountStore.accounts) }
         var selectedPreset by remember {
             mutableStateOf(accountStore.accounts.firstOrNull { it.bundled && it.username == username }?.username)
@@ -173,11 +179,21 @@ class SettingsActivity : ComponentActivity() {
                     notifyConfigChanged()
                     error = null
                     focus.clearFocus()
-                    showSettings = false
-                    login.saved()
+                    if (login.isWifiOnline()) {
+                        showSettings = true
+                        savedOnline = true
+                    } else {
+                        savedOnline = false
+                        showSettings = false
+                        login.saved()
+                    }
                 } else error = "保存失败，请重试"
             }
         }
+        LaunchedEffect(savedOnline) {
+            if (savedOnline) { delay(1800); savedOnline=false }
+        }
+        LaunchedEffect(username,password,enabled,fast,silent) { savedOnline=false }
         LaunchedEffect(showUpdate.value) {
             if (showUpdate.value) { about.value = false; focus.clearFocus() }
         }
@@ -288,11 +304,12 @@ class SettingsActivity : ComponentActivity() {
                     }
                 }
                 TextButton(text = when {
+                    savedOnline -> "已联网"
                     !valid -> "请输入账号和密码"
                     !changed -> "已保存"
                     credentialsChanged -> "保存并登录"
                     else -> "保存修改"
-                }, enabled = valid && changed, onClick = { save() },
+                }, enabled = valid && changed && !savedOnline, onClick = { save() },
                     modifier = Modifier.fillMaxWidth(), minHeight = 54.dp,
                     colors = ButtonDefaults.textButtonColorsPrimary())
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -318,6 +335,9 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = "清除账号", onClick = { focus.clearFocus(); confirmClear.value = true },
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                     minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
+                if (!moduleAvailable) Text("LSPosed 未启动，启用后可使用完整功能",
+                    fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp))
             }
         }
         SuperDialog(show = confirmClear, title = "清除账号？", summary = "清除自存账号与登录配置，保留内置预设",

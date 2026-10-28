@@ -33,7 +33,7 @@ class AppLoginController private constructor(private val context: Context) {
     private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
         ArrayBlockingQueue<Runnable>(2), { r -> Thread(r, "PortalAppAuth").apply { isDaemon = true } })
     private val attempts = LoginAttempts()
-    private val history = context.getSharedPreferences("app_login", Context.MODE_PRIVATE)
+    private val history = UnifiedPreferences.open(context,"app_login")
     private lateinit var prefs: SharedPreferences
     private var moduleAvailable = false
     private var foreground = false
@@ -64,6 +64,7 @@ class AppLoginController private constructor(private val context: Context) {
         check(true)
     }
     fun retry() = check(true)
+    fun isWifiOnline(): Boolean = runCatching { wifi()?.let { validated(it) } == true }.getOrDefault(false)
     fun consumeSuccessAnimation(id: Long): Boolean {
         if (animatedSuccess == id) return false
         animatedSuccess = id
