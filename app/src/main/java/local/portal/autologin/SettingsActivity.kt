@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -48,6 +49,7 @@ class SettingsActivity : ComponentActivity() {
     private lateinit var accountStore: AccountStore
     private var moduleAvailable = false
     private var showSettings by mutableStateOf(false)
+    private var foreground by mutableStateOf(false)
     private var pendingLog: String? = null
     private var pendingInstallation: File? = null
     private val installPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -82,6 +84,14 @@ class SettingsActivity : ComponentActivity() {
         login = AppLoginController.get(this)
         setContent {
             MiuixTheme(colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+                val updates = remember { AppUpdates.get(this@SettingsActivity) }
+                val showUpdate = rememberSaveable { mutableStateOf(false) }
+                val version = remember {
+                    runCatching { packageManager.getPackageInfo(packageName, 0).versionName.orEmpty() }.getOrDefault("")
+                }
+                LaunchedEffect(updates.ready, foreground) {
+                    if (foreground && updates.consumeInstallationPrompt()) showUpdate.value = true
+                }
                 val state = login.state
                 val accountPage = showSettings || state.stage == AppLoginController.Stage.CONFIGURATION
                 SideEffect {
@@ -90,7 +100,7 @@ class SettingsActivity : ComponentActivity() {
                 }
                 if (accountPage) {
                     BackHandler(enabled = showSettings) { showSettings = false }
-                    SettingsPage(prefs)
+                    SettingsPage(prefs, updates, showUpdate, version)
                 } else {
                     LoginResultPage(state, login,
                         onSettings = { showSettings = true },
@@ -101,21 +111,26 @@ class SettingsActivity : ComponentActivity() {
                             runCatching { startActivity(Intent(action)) }
                         })
                 }
+                UpdateCard(show = showUpdate, updates = updates, currentVersion = version,
+                    install = ::installUpdate, openBrowser = ::openBrowser)
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
+        foreground = true
         login.enterForeground(prefs, moduleAvailable)
     }
     override fun onPause() {
+        foreground = false
         login.leaveForeground()
         super.onPause()
     }
 
     @Composable
-    private fun SettingsPage(prefs: SharedPreferences) {
+    private fun SettingsPage(prefs: SharedPreferences, updates: AppUpdates,
+                             showUpdate: MutableState<Boolean>, version: String) {
         var username by remember { mutableStateOf(prefs.getString("username", "") ?: "") }
         var password by remember { mutableStateOf(prefs.getString("password", "") ?: "") }
         var enabled by remember { mutableStateOf(prefs.getBoolean("enabled", false)) }
@@ -125,17 +140,23 @@ class SettingsActivity : ComponentActivity() {
         var showPassword by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(if (accountStore.initializationFailed) "账号列表读取失败，请重试" else null) }
         var savedAccounts by remember { mutableStateOf(accountStore.accounts) }
+        var selectedPreset by remember {
+            mutableStateOf(accountStore.accounts.firstOrNull { it.bundled && it.username == username }?.username)
+        }
+        var savedUsername by remember { mutableStateOf(username.trim()) }
+        var savedPassword by remember { mutableStateOf(password) }
+        var savedEnabled by remember { mutableStateOf(enabled) }
+        var savedFast by remember { mutableStateOf(fast) }
+        var savedSilent by remember { mutableStateOf(silent) }
         val accountPicker = remember { mutableStateOf(false) }
         val confirmClear = remember { mutableStateOf(false) }
         val about = remember { mutableStateOf(false) }
         var sharing by remember { mutableStateOf(false) }
-        val showUpdate = remember { mutableStateOf(false) }
-        val updates = remember { AppUpdates.get(this@SettingsActivity) }
-        val version = remember {
-            runCatching { packageManager.getPackageInfo(packageName, 0).versionName.orEmpty() }.getOrDefault("")
-        }
         val focus = LocalFocusManager.current
         val loginOptionsEnabled = enabled
+        val valid = username.isNotBlank() && password.isNotEmpty()
+        val credentialsChanged = username.trim() != savedUsername || password != savedPassword
+        val changed = credentialsChanged || enabled != savedEnabled || fast != savedFast || silent != savedSilent
         val save = {
             if (username.isBlank() || password.isEmpty()) {
                 error = "请输入账号和密码"
@@ -147,6 +168,8 @@ class SettingsActivity : ComponentActivity() {
                     .putString("password", password).putBoolean("enabled", enabled)
                     .putBoolean("fast", fast).putBoolean("silent", silent).commit()
                 if (ok) {
+                    savedUsername = username.trim(); savedPassword = password
+                    savedEnabled = enabled; savedFast = fast; savedSilent = silent
                     notifyConfigChanged()
                     error = null
                     focus.clearFocus()
@@ -154,6 +177,9 @@ class SettingsActivity : ComponentActivity() {
                     login.saved()
                 } else error = "保存失败，请重试"
             }
+        }
+        LaunchedEffect(showUpdate.value) {
+            if (showUpdate.value) { about.value = false; focus.clearFocus() }
         }
         if (sharing) {
             ShareAccountsPage(accounts = accountStore.accounts, onBack = { sharing = false; about.value = true }, openBrowser = ::openBrowser)
@@ -204,7 +230,7 @@ class SettingsActivity : ComponentActivity() {
                 }
                 Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(14.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextField(value = username, onValueChange = { username = it; error = null },
+                        TextField(value = username, onValueChange = { username = it; error = null }, readOnly = selectedPreset != null,
                             label = "账号", singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false,
@@ -219,6 +245,11 @@ class SettingsActivity : ComponentActivity() {
                                     },
                                     onSelect = { account ->
                                         username = account.username; password = account.password
+                                        selectedPreset = account.username.takeIf { account.bundled }
+                                        showPassword = false; error = null; accountPicker.value = false
+                                    },
+                                    onNew = {
+                                        selectedPreset = null; username = ""; password = ""
                                         showPassword = false; error = null; accountPicker.value = false
                                     },
                                     onDelete = { account ->
@@ -232,6 +263,8 @@ class SettingsActivity : ComponentActivity() {
                                             savedAccounts = accountStore.accounts
                                             if (username.trim() == account.username) {
                                                 username = ""; password = ""; showPassword = false
+                                                selectedPreset = null
+                                                if (active) { savedUsername = ""; savedPassword = "" }
                                             }
                                             error = null
                                             if (savedAccounts.isEmpty()) accountPicker.value = false
@@ -239,13 +272,13 @@ class SettingsActivity : ComponentActivity() {
                                         }
                                     })
                             })
-                        TextField(value = password, onValueChange = { password = it; error = null },
+                        TextField(value = password, onValueChange = { password = it; error = null }, readOnly = selectedPreset != null,
                             label = "密码", singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false,
                                 keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { save() }),
+                            keyboardActions = KeyboardActions(onDone = { if (valid && changed) save() }),
                             trailingIcon = {
                                 TextButton(text = if (showPassword) "隐藏" else "显示",
                                     onClick = { showPassword = !showPassword },
@@ -254,7 +287,12 @@ class SettingsActivity : ComponentActivity() {
                             })
                     }
                 }
-                TextButton(text = "保存", onClick = { save() },
+                TextButton(text = when {
+                    !valid -> "请输入账号和密码"
+                    !changed -> "已保存"
+                    credentialsChanged -> "保存并登录"
+                    else -> "保存修改"
+                }, enabled = valid && changed, onClick = { save() },
                     modifier = Modifier.fillMaxWidth(), minHeight = 54.dp,
                     colors = ButtonDefaults.textButtonColorsPrimary())
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -290,6 +328,8 @@ class SettingsActivity : ComponentActivity() {
                     colors = ButtonDefaults.textButtonColorsPrimary(), onClick = {
                         if (prefs.edit().clear().commit()) {
                             username = ""; password = ""; enabled = false; fast = true; silent = false; debugLog = false
+                            selectedPreset = null; savedUsername = ""; savedPassword = ""
+                            savedEnabled = false; savedFast = true; savedSilent = false
                             notifyConfigChanged()
                             DiagnosticLog.setEnabled(false)
                             login.clear()
@@ -329,8 +369,6 @@ class SettingsActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColorsPrimary())
             }
         }
-        UpdateCard(show = showUpdate, updates = updates, currentVersion = version,
-            install = ::installUpdate, openBrowser = ::openBrowser)
     }
 
     @Composable

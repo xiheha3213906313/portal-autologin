@@ -29,15 +29,23 @@ internal class AppUpdates private constructor(private val context: Context) {
     var progress by mutableStateOf(-1); private set
     var ready by mutableStateOf<File?>(null); private set
     var downloadError by mutableStateOf<String?>(null); private set
+    private var installationPromptPending = false
     private val main = Handler(Looper.getMainLooper())
     private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
         ArrayBlockingQueue<Runnable>(2), { r -> Thread(r, "PortalUpdates").apply { isDaemon = true } })
 
     fun consumeResult(): CheckResult? = checkResult.also { checkResult = null }
 
+    // Keep the completion event until a foreground Activity can display it, then consume once.
+    fun consumeInstallationPrompt(): Boolean {
+        if (ready == null || !installationPromptPending) return false
+        installationPromptPending = false
+        return true
+    }
+
     fun check(currentVersion: String) {
         if (checking || downloading) return
-        checking = true; checkResult = null; ready = null; downloadError = null
+        checking = true; checkResult = null; ready = null; installationPromptPending = false; downloadError = null
         worker.execute {
             try {
                 val json = JSONObject(metadata())
@@ -115,7 +123,7 @@ internal class AppUpdates private constructor(private val context: Context) {
         val info = release ?: return
         val url = info.apk ?: return
         if (downloading) return
-        downloading = true; progress = -1; ready = null; downloadError = null
+        downloading = true; progress = -1; ready = null; installationPromptPending = false; downloadError = null
         worker.execute {
             val dir = File(context.cacheDir, "updates").apply { mkdirs() }
             val part = File(dir, "download.part.apk")
@@ -145,7 +153,7 @@ internal class AppUpdates private constructor(private val context: Context) {
                 verify(part, info.version)
                 val file = File(dir, "update.apk")
                 if (file.exists() && !file.delete() || !part.renameTo(file)) throw IOException("file_failed")
-                main.post { ready = file; progress = 100; downloading = false }
+                main.post { installationPromptPending = true; ready = file; progress = 100; downloading = false }
             } catch (_: Exception) {
                 part.delete()
                 main.post { downloading = false; downloadError = "下载或校验失败，请重试或使用浏览器" }
