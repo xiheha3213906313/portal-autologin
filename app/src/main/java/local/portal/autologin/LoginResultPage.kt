@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -35,7 +36,8 @@ fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController
     val connecting = state.stage == AppLoginController.Stage.CONNECTING
     val accent = if (success) Color(0xFF36B76B) else MiuixTheme.colorScheme.primary
     val foreground = MiuixTheme.colorScheme.onBackground
-    Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background).safeDrawingPadding()) {
+    Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
+        .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
         Column(Modifier.align(Alignment.Center).padding(horizontal = 32.dp).offset(y = (-24).dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(28.dp)) {
@@ -64,10 +66,15 @@ fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController
             horizontalAlignment = Alignment.CenterHorizontally) {
             TextButton(text = "设置", onClick = onSettings,
                 minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
-            if (!moduleActive) Text("LSPosed 未启动，启用后可使用完整功能", fontSize = 12.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            if (!moduleActive) ModuleStatusHint()
         }
     }
+}
+
+@Composable
+internal fun ModuleStatusHint() {
+    Text("LSPosed 未启动，启用后可使用完整功能", fontSize = 12.sp,
+        textAlign = TextAlign.Center, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
 }
 
 @Composable

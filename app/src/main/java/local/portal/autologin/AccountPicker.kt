@@ -66,7 +66,7 @@ internal fun AccountPicker(show: MutableState<Boolean>, accounts: List<SavedAcco
                                 .background(Color(0xFFD9363E), RoundedCornerShape(10.dp))
                                 .clickable(role = Role.Button) { pendingDelete = null; onDelete(account) },
                                 contentAlignment = Alignment.Center) {
-                                Text("确认", fontSize = 13.sp, color = Color.White)
+                                Text("确认", fontSize = 12.sp, color = Color.White)
                             }
                         } else IconButton(onClick = { pendingDelete = account.username }, minWidth = 36.dp, minHeight = 36.dp,
                             backgroundColor = Color.Transparent,

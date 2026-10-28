@@ -162,7 +162,11 @@ class SettingsActivity : ComponentActivity() {
         val loginOptionsEnabled = enabled
         val valid = username.isNotBlank() && password.isNotEmpty()
         val credentialsChanged = username.trim() != savedUsername || password != savedPassword
-        val changed = credentialsChanged || enabled != savedEnabled || fast != savedFast || silent != savedSilent
+        val optionsChanged = enabled != savedEnabled || fast != savedFast || silent != savedSilent
+        val changed = credentialsChanged || optionsChanged
+        val switchingSavedAccount = credentialsChanged && !optionsChanged && savedAccounts.any {
+            it.username == username.trim() && it.password == password
+        }
         val save = {
             if (username.isBlank() || password.isEmpty()) {
                 error = "请输入账号和密码"
@@ -207,7 +211,7 @@ class SettingsActivity : ComponentActivity() {
                 else Toast.makeText(this@SettingsActivity, result.message, Toast.LENGTH_SHORT).show()
             }
         }
-        Scaffold(topBar = {
+        Scaffold(contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout), topBar = {
             Surface(color = MiuixTheme.colorScheme.background) {
                 // Match the previous expanded title: native 56dp top spacing, raised by 12dp.
                 Row(modifier = Modifier.fillMaxWidth()
@@ -223,6 +227,15 @@ class SettingsActivity : ComponentActivity() {
                     }
                 }
             }
+        }, bottomBar = {
+            if (!moduleAvailable) Box(
+                modifier = Modifier.fillMaxWidth()
+                    // safeDrawing also includes IME; the footer must stay behind the keyboard.
+                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                        .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                    .padding(horizontal = 20.dp).padding(bottom = 24.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) { ModuleStatusHint() }
         }) { padding ->
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
@@ -306,9 +319,9 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = when {
                     savedOnline -> "已联网"
                     !valid -> "请输入账号和密码"
-                    !changed -> "已保存"
-                    credentialsChanged -> "保存并登录"
-                    else -> "保存修改"
+                    !changed -> "当前配置"
+                    switchingSavedAccount -> "切换配置"
+                    else -> "保存并登录"
                 }, enabled = valid && changed && !savedOnline, onClick = { save() },
                     modifier = Modifier.fillMaxWidth(), minHeight = 54.dp,
                     colors = ButtonDefaults.textButtonColorsPrimary())
@@ -335,9 +348,6 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = "清除账号", onClick = { focus.clearFocus(); confirmClear.value = true },
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                     minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
-                if (!moduleAvailable) Text("LSPosed 未启动，启用后可使用完整功能",
-                    fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp))
             }
         }
         SuperDialog(show = confirmClear, title = "清除账号？", summary = "清除自存账号与登录配置，保留内置预设",
