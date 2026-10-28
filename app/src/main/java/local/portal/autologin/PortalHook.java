@@ -35,6 +35,7 @@ public class PortalHook implements IXposedHookLoadPackage {
     private static long nextAttempt;
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) throws Throwable {
+        if (!DeviceCompatibility.supportsModule(android.os.Build.BRAND, android.os.Build.MANUFACTURER)) return;
         if ("android".equals(p.packageName) && ("android".equals(p.processName) || "system_server".equals(p.processName))) {
             try {
                 Class<?> server=XposedHelpers.findClass("com.android.server.SystemServer",p.classLoader);
@@ -128,8 +129,7 @@ public class PortalHook implements IXposedHookLoadPackage {
                 String user = prefs.getString("username", "");
                 String pass = prefs.getString("password", "");
                 if (user.isEmpty() || pass.isEmpty()) return;
-                script = LoginScript.CODE.replace("__FAST__", prefs.getBoolean("fast", true) ? "true" : "false")
-                    .replace("__CREDENTIALS__", new JSONArray().put(user).put(pass).toString());
+                script = LoginScript.CODE.replace("__CREDENTIALS__", new JSONArray().put(user).put(pass).toString());
                 active = true;
                 deadline = SystemClock.elapsedRealtime() + 120000;
                 handler.postDelayed(this, 150);

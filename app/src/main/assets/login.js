@@ -26,7 +26,7 @@
   const code = d.getElementById('accesscode');
   if (code && visible(code) && !code.disabled && !code.value) return 'manual_accesscode';
   const credentials = __CREDENTIALS__;
-  const pace = __FAST__ ? [30, 8, 60, 120] : [150, 80, 250, 500];
+  const pace = [30, 8, 60, 120];
   w.__localPortalState = 'typing';
   const pause = ms => new Promise(resolve => w.setTimeout(resolve, ms));
   const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value').set;

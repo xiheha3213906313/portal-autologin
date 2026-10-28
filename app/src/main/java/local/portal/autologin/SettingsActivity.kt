@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.os.Build
 import android.net.Uri
 import android.provider.Settings
 import android.view.WindowManager
@@ -49,6 +50,7 @@ class SettingsActivity : ComponentActivity() {
     private lateinit var login: AppLoginController
     private lateinit var accountStore: AccountStore
     private var moduleAvailable = false
+    private val xiaomiSystem = DeviceCompatibility.supportsModule(Build.BRAND, Build.MANUFACTURER)
     private var showSettings by mutableStateOf(false)
     private var foreground by mutableStateOf(false)
     private var pendingLog: String? = null
@@ -106,7 +108,7 @@ class SettingsActivity : ComponentActivity() {
                     BackHandler(enabled = showSettings) { showSettings = false }
                     SettingsPage(prefs, updates, showUpdate, version)
                 } else {
-                    LoginResultPage(state, login, moduleAvailable,
+                    LoginResultPage(state, login, moduleAvailable, xiaomiSystem,
                         onSettings = { showSettings = true },
                         onRetry = { login.retry() },
                         onWifi = {
@@ -124,7 +126,7 @@ class SettingsActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         foreground = true
-        login.enterForeground(prefs, moduleAvailable)
+        login.enterForeground(prefs, moduleAvailable && xiaomiSystem)
     }
     override fun onPause() {
         foreground = false
@@ -138,13 +140,12 @@ class SettingsActivity : ComponentActivity() {
         var username by remember { mutableStateOf(prefs.getString("username", "") ?: "") }
         var password by remember { mutableStateOf(prefs.getString("password", "") ?: "") }
         var enabled by remember { mutableStateOf(prefs.getBoolean("enabled", false)) }
-        var fast by remember { mutableStateOf(prefs.getBoolean("fast", true)) }
         var silent by remember { mutableStateOf(prefs.getBoolean("silent", false)) }
         var debugLog by remember { mutableStateOf(prefs.getBoolean("debug_log", false)) }
         var showPassword by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(if (accountStore.initializationFailed ||
             (prefs as? UnifiedPreferences)?.initializationFailed == true) "配置读取失败，请重试" else null) }
-        var savedOnline by remember { mutableStateOf(false) }
+        var savedFeedback by remember { mutableStateOf(false) }
         var savedAccounts by remember { mutableStateOf(accountStore.accounts) }
         var selectedPreset by remember {
             mutableStateOf(accountStore.accounts.firstOrNull { it.bundled && it.username == username }?.username)
@@ -152,17 +153,16 @@ class SettingsActivity : ComponentActivity() {
         var savedUsername by remember { mutableStateOf(username.trim()) }
         var savedPassword by remember { mutableStateOf(password) }
         var savedEnabled by remember { mutableStateOf(enabled) }
-        var savedFast by remember { mutableStateOf(fast) }
         var savedSilent by remember { mutableStateOf(silent) }
         val accountPicker = remember { mutableStateOf(false) }
         val confirmClear = remember { mutableStateOf(false) }
         val about = remember { mutableStateOf(false) }
         var sharing by remember { mutableStateOf(false) }
         val focus = LocalFocusManager.current
-        val loginOptionsEnabled = enabled
+        val loginOptionsEnabled = xiaomiSystem && enabled
         val valid = username.isNotBlank() && password.isNotEmpty()
         val credentialsChanged = username.trim() != savedUsername || password != savedPassword
-        val optionsChanged = enabled != savedEnabled || fast != savedFast || silent != savedSilent
+        val optionsChanged = enabled != savedEnabled || silent != savedSilent
         val changed = credentialsChanged || optionsChanged
         val switchingSavedAccount = credentialsChanged && !optionsChanged && savedAccounts.any {
             it.username == username.trim() && it.password == password
@@ -176,28 +176,28 @@ class SettingsActivity : ComponentActivity() {
                 savedAccounts = accountStore.accounts
                 val ok = prefs.edit().putString("username", username.trim())
                     .putString("password", password).putBoolean("enabled", enabled)
-                    .putBoolean("fast", fast).putBoolean("silent", silent).commit()
+                    .putBoolean("silent", silent).commit()
                 if (ok) {
                     savedUsername = username.trim(); savedPassword = password
-                    savedEnabled = enabled; savedFast = fast; savedSilent = silent
+                    savedEnabled = enabled; savedSilent = silent
                     notifyConfigChanged()
                     error = null
                     focus.clearFocus()
                     if (login.isWifiOnline()) {
                         showSettings = true
-                        savedOnline = true
+                        savedFeedback = true
                     } else {
-                        savedOnline = false
+                        savedFeedback = false
                         showSettings = false
                         login.saved()
                     }
                 } else error = "保存失败，请重试"
             }
         }
-        LaunchedEffect(savedOnline) {
-            if (savedOnline) { delay(1800); savedOnline=false }
+        LaunchedEffect(savedFeedback) {
+            if (savedFeedback) { delay(1800); savedFeedback=false }
         }
-        LaunchedEffect(username,password,enabled,fast,silent) { savedOnline=false }
+        LaunchedEffect(username,password,enabled,silent) { savedFeedback=false }
         LaunchedEffect(showUpdate.value) {
             if (showUpdate.value) { about.value = false; focus.clearFocus() }
         }
@@ -228,14 +228,14 @@ class SettingsActivity : ComponentActivity() {
                 }
             }
         }, bottomBar = {
-            if (!moduleAvailable) Box(
+            Box(
                 modifier = Modifier.fillMaxWidth()
                     // safeDrawing also includes IME; the footer must stay behind the keyboard.
                     .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)
                         .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                     .padding(horizontal = 20.dp).padding(bottom = 24.dp),
                 contentAlignment = Alignment.BottomCenter
-            ) { ModuleStatusHint() }
+            ) { ModuleStatusHint(moduleAvailable, xiaomiSystem) }
         }) { padding ->
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
@@ -250,9 +250,8 @@ class SettingsActivity : ComponentActivity() {
                 }
                 if (moduleAvailable) Card(modifier = Modifier.fillMaxWidth()) {
                     SuperSwitch(title = "自动登录", checked = enabled,
+                        enabled = xiaomiSystem,
                         onCheckedChange = { enabled = it })
-                    SuperSwitch(title = "快速填写", checked = fast, enabled = loginOptionsEnabled,
-                        onCheckedChange = { fast = it })
                     SuperSwitch(title = "静默登录", checked = silent, enabled = loginOptionsEnabled,
                         summary = if (silent) "实验功能：勾选系统框架作用域后重启" else null,
                         onCheckedChange = { silent = it })
@@ -317,12 +316,12 @@ class SettingsActivity : ComponentActivity() {
                     }
                 }
                 TextButton(text = when {
-                    savedOnline -> "已联网"
+                    savedFeedback -> "已保存"
                     !valid -> "请输入账号和密码"
                     !changed -> "当前配置"
                     switchingSavedAccount -> "切换配置"
                     else -> "保存并登录"
-                }, enabled = valid && changed && !savedOnline, onClick = { save() },
+                }, enabled = valid && changed && !savedFeedback, onClick = { save() },
                     modifier = Modifier.fillMaxWidth(), minHeight = 54.dp,
                     colors = ButtonDefaults.textButtonColorsPrimary())
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -357,9 +356,9 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = "清除", modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.textButtonColorsPrimary(), onClick = {
                         if (prefs.edit().clear().commit()) {
-                            username = ""; password = ""; enabled = false; fast = true; silent = false; debugLog = false
+                            username = ""; password = ""; enabled = false; silent = false; debugLog = false
                             selectedPreset = null; savedUsername = ""; savedPassword = ""
-                            savedEnabled = false; savedFast = true; savedSilent = false
+                            savedEnabled = false; savedSilent = false
                             notifyConfigChanged()
                             DiagnosticLog.setEnabled(false)
                             login.clear()

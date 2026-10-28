@@ -30,7 +30,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController, moduleActive: Boolean,
+fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController, moduleActive: Boolean, xiaomiSystem: Boolean,
                     onSettings: () -> Unit, onRetry: () -> Unit, onWifi: () -> Unit) {
     val success = state.stage == AppLoginController.Stage.SUCCESS
     val connecting = state.stage == AppLoginController.Stage.CONNECTING
@@ -66,14 +66,19 @@ fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController
             horizontalAlignment = Alignment.CenterHorizontally) {
             TextButton(text = "设置", onClick = onSettings,
                 minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
-            if (!moduleActive) ModuleStatusHint()
+            ModuleStatusHint(moduleActive, xiaomiSystem)
         }
     }
 }
 
 @Composable
-internal fun ModuleStatusHint() {
-    Text("LSPosed 未启动，启用后可使用完整功能", fontSize = 12.sp,
+internal fun ModuleStatusHint(moduleActive: Boolean, xiaomiSystem: Boolean) {
+    val message = when {
+        moduleActive -> "仅支持小米系统使用完整功能"
+        !xiaomiSystem -> "当前系统仅支持基础模式"
+        else -> "LSPosed 未启动，启用后可使用完整功能"
+    }
+    Text(message, fontSize = 12.sp,
         textAlign = TextAlign.Center, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
 }
 

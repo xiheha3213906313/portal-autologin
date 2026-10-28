@@ -50,6 +50,7 @@ public final class SilentPortal {
         HandlerThread thread=new HandlerThread("PortalNetworkObserver");thread.start();handler=new Handler(thread.getLooper());
     }
     public static synchronized void start(Context context) {
+        if (!DeviceCompatibility.supportsModule(Build.BRAND,Build.MANUFACTURER)) return;
         if (instance!=null) return;
         config();
         SilentPortal s=new SilentPortal(context);

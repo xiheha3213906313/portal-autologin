@@ -5,7 +5,7 @@ import java.util.*;
 
 /** Bounded in-memory trace. Only stage tokens, integer counters and allowlisted faults. */
 public final class DiagnosticLog {
-    public static final String VERSION="1.2.4";
+    public static final String VERSION="1.3.0";
     private static boolean enabled;
     private static final ArrayDeque<String> lines=new ArrayDeque<>();
     private static final Set<String> REASONS=new HashSet<>(Arrays.asList(
