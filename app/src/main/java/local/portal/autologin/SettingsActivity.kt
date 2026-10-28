@@ -76,6 +76,7 @@ class SettingsActivity : ComponentActivity() {
         val confirmClear = remember { mutableStateOf(false) }
         val focus = LocalFocusManager.current
         val usable = prefs != null
+        val loginOptionsEnabled = usable && enabled
         val save = {
             if (prefs == null) {
                 error = "请先在 LSPosed 启用模块"
@@ -111,9 +112,9 @@ class SettingsActivity : ComponentActivity() {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     SuperSwitch(title = "自动登录", checked = enabled, enabled = usable,
                         onCheckedChange = { enabled = it })
-                    SuperSwitch(title = "快速填写", checked = fast, enabled = usable,
+                    SuperSwitch(title = "快速填写", checked = fast, enabled = loginOptionsEnabled,
                         onCheckedChange = { fast = it })
-                    SuperSwitch(title = "静默登录", checked = silent, enabled = usable,
+                    SuperSwitch(title = "静默登录", checked = silent, enabled = loginOptionsEnabled,
                         summary = if (silent) "实验功能：勾选系统框架作用域后重启" else null,
                         onCheckedChange = { silent = it })
                 }
