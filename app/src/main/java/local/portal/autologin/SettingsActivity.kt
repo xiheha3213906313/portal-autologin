@@ -311,8 +311,10 @@ class SettingsActivity : ComponentActivity() {
             summary = "门户自动登录 $version\n作者：xiheha\n源码已公开",
             onDismissRequest = { about.value = false }) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AboutLink("项目地址", PROJECT_URL) { openBrowser(PROJECT_URL) }
-                AboutLink("帮助我们", "分享你的账号密码") { about.value = false; sharing = true }
+                Column {
+                    AboutLink("项目地址", PROJECT_URL) { openBrowser(PROJECT_URL) }
+                    AboutLink("帮助我们", "分享你的账号密码") { about.value = false; sharing = true }
+                }
                 TextButton(text = when {
                     updates.checking -> "检查中…"
                     updates.downloading -> "查看下载进度"
@@ -333,12 +335,12 @@ class SettingsActivity : ComponentActivity() {
 
     @Composable
     private fun AboutLink(label: String, value: String, onClick: () -> Unit) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 38.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = 34.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(label, fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             Text(value, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 color = MiuixTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f).clickable(role = Role.Button, onClick = onClick).padding(vertical = 8.dp))
+                modifier = Modifier.weight(1f).clickable(role = Role.Button, onClick = onClick).padding(vertical = 6.dp))
         }
     }
 

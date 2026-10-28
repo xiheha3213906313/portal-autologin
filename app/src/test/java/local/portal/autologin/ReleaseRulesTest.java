@@ -9,6 +9,7 @@ public class ReleaseRulesTest {
     @Test public void comparesNumericVersionsInsteadOfText() {
         assertTrue(ReleaseRules.compareVersions("v1.10","1.9")>0);
         assertEquals(0,ReleaseRules.compareVersions("1.2.0","1.2"));
+        assertTrue(ReleaseRules.compareVersions("1.2.1","1.2")>0);
         assertTrue(ReleaseRules.compareVersions("1.1","1.2")<0);
     }
     @Test public void refusesMalformedVersionTags() {

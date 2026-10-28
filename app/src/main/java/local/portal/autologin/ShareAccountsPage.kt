@@ -25,6 +25,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ShareAccountsPage(accounts: List<SavedAccountBook.Account>, onBack: () -> Unit,
                                openBrowser: (String) -> Unit) {
+    val shareableAccounts = accounts.filterNot { it.bundled }
     var selected by remember { mutableStateOf<SavedAccountBook.Account?>(null) }
     var project by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -47,11 +48,11 @@ internal fun ShareAccountsPage(accounts: List<SavedAccountBook.Account>, onBack:
         LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (accounts.isEmpty()) item {
+            if (shareableAccounts.isEmpty()) item {
                 Text("暂无保存的配置", color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(16.dp))
             }
-            items(accounts, key = { it.username }) { account ->
+            items(shareableAccounts, key = { it.username }) { account ->
                 Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(start=16.dp,end=8.dp,top=6.dp,bottom=6.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(account.displayName(), maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -66,7 +67,7 @@ internal fun ShareAccountsPage(accounts: List<SavedAccountBook.Account>, onBack:
             }
         }
     }
-    val account = selected
+    val account = selected?.takeUnless { it.bundled }
     if (account != null) SuperDialog(show = confirm, title = "分享配置",
         onDismissRequest = { confirm.value = false }) {
         Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState()),
