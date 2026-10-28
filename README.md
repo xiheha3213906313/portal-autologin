@@ -18,7 +18,7 @@
 - 同步成功请求的 User-Agent、Accept、Accept-Language、Client Hints、Sec-Fetch、Cache-Control 和连接头。连接头恢复为成功请求中的 keep-alive；0.4.2 关闭连接未解决 EOF。
 - Cookie 仍从本次 GET 响应建立，不预置或读取用户浏览器的 Cookie。诊断新增每阶段 Cookie 数量、Cookie 版本标记，及隐藏字段的缺失/空/非空状态（-1 / 0 / 1），不写入实际字段值。
 - 保留提交响应不确定时的同 Wi-Fi 联网复测，不自动重发 POST。
-- 浏览器成功不等于后台版本已成功；这些差异的具体作用仍需下一次真机日志验证。若仍出现 EOF，应继续比较 Cookie 建立和请求行为，不把 EOF 当成凭据错误。
+- 0.4.3 已在小米 14 / Android 16 的目标访客 Wi-Fi 上验证后台认证成功：提交携带一个 Cookie 和两个隐藏标志，收到 HTTP 302，随后同一个 Network 获得 VALIDATED 并记录 `validated`，从尝试开始到验证完成约 2.2 秒。这个结果确认了当前设备和门户上的后台认证，不能单独归因于某一个字段或请求头的调整。
 
 ## 0.4.2 提交后连接关闭兼容处理
 
@@ -83,6 +83,7 @@
 
 ## 验证
 
+- 0.4.3 真机日志确认后台提交后同一 Wi-Fi 通过系统联网验证；HTTP 302 的空响应正文不作为失败依据。跨设备兼容性和长期稳定性仍需持续验证。
 - `node tests/login.test.cjs`：模拟 DOM，验证逐字输入/失焦/单次点击、同源 iframe、冷却、额外条件及后台停止。
 - `./gradlew :app:testReleaseUnitTest`：14 个测试覆盖表单编码、隐藏值、RedirectUrl、同源限制、Cookie、单次提交与提交前取消，以及诊断开关、容量限制、异常脱敏和失败阶段定位。
 - Java/Kotlin 编译、DEX 转换、Android Lint、APK 对齐与签名校验。
