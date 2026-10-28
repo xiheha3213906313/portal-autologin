@@ -123,9 +123,8 @@ public class PortalHook implements IXposedHookLoadPackage {
                 if (!prefs.getBoolean("enabled", false)) {
                     XposedBridge.log("PortalAuto: disabled or configuration unavailable"); return;
                 }
-                if (prefs.getBoolean("silent", false)) {
-                    XposedBridge.log("PortalAuto: foreground autofill deferred to silent mode"); return;
-                }
+                // Silent mode controls the background attempt, not the foreground fallback.
+                // Standard portal launches are gated in system_server while that attempt is active.
                 String user = prefs.getString("username", "");
                 String pass = prefs.getString("password", "");
                 if (user.isEmpty() || pass.isEmpty()) return;
