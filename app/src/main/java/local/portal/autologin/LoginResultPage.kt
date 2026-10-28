@@ -73,6 +73,7 @@ fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController
 
 @Composable
 internal fun ModuleStatusHint(moduleActive: Boolean, xiaomiSystem: Boolean) {
+    if (moduleActive && xiaomiSystem) return
     val message = when {
         moduleActive -> "仅支持小米系统使用完整功能"
         !xiaomiSystem -> "当前系统仅支持基础模式"

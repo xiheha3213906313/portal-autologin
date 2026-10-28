@@ -228,7 +228,7 @@ class SettingsActivity : ComponentActivity() {
                 }
             }
         }, bottomBar = {
-            Box(
+            if (!moduleAvailable || !xiaomiSystem) Box(
                 modifier = Modifier.fillMaxWidth()
                     // safeDrawing also includes IME; the footer must stay behind the keyboard.
                     .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)
