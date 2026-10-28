@@ -1,14 +1,26 @@
-# 门户自动登录 0.3.0
+# 门户自动登录 0.4.0（实验静默模式）
 
 为用户已验证的访客门户编写的 LSPosed 传统 API 模块。测试目标：小米 14、Android 16、小米浏览器门户 Activity。
 
 ## 安装
 
-1. 安装 `portal-autologin-0.3.0.apk`。
-2. 在 LSPosed 中启用“门户自动登录”，作用域勾选“小米浏览器 / com.android.browser”。不要勾选系统框架；已安装的 `com.android.captiveportallogin` 包不是本机实际宿主。
+1. 安装 `portal-autologin-0.4.0.apk`。
+2. 在 LSPosed 中启用“门户自动登录”，作用域勾选“小米浏览器 / com.android.browser”。前台模式只需此作用域；实验静默模式还需勾选“系统框架 / android”并重启。已安装的 `com.android.captiveportallogin` 包不是本机实际宿主。
 3. 重启手机一次，打开模块配置应用，填写自己的账号密码，打开开关并保存。
 4. Wi-Fi 下次要求认证时打开系统登录通知，让登录页面留在前台。模块识别指定页面后自动逐字填写并点击 Login。
-5. 已认证时不会强制注销，不需要重复试登录。完全不显示门户窗口不是此版本承诺的功能。
+5. 实验静默模式：同时开启“自动登录”和“静默登录”并保存。未登录 Wi-Fi 出现 CAPTIVE_PORTAL 能力时才尝试后台认证。已认证时不强制注销。
+
+## 0.4.0 实验静默模式
+
+- 在系统框架作用域里，SystemServer 服务启动后注册 Wi-Fi 网络事件回调；无需打开浏览器或模块界面触发，没有常驻轮询、前台服务或通知保活。
+- 工作线程通过对应 `Network.openConnection` 获取 `/index.html`、`leftFrame` 指向的 `/login.html` 和新 Cookie，再 POST `/login`。密码不做额外转换，复现已采集的 CheckSubmit 长度校验与 SetRedirectUrl 的 200 字符截取。保留服务器新生成的隐藏字段。
+- 保持 HTTPS 证书验证，GET 重定向限定相同源，POST 之后不跟随跳转。每次最多提交一个请求，网络请求不运行在系统主线程上。
+- 后台模式遇到可见访问码、条款、变化的字段或跨域表单时停止；无法从静态 HTML 证明控件隐藏时也停止。现阶段不执行外部 CSS/JS，网页变化时可关闭静默恢复前台模式。
+- 在本次尝试期间，若能找到系统 ConnectivityService 的门户启动方法，则临时拦截对应 Network 的启动；失败或超过 45 秒自动放行。小米系统可能存在其他启动路径，因此此版本不保证任何设备上窗口都不闪现。日志 `launch_hooks_0` 或 `launch_hook_unavailable` 表示窗口抑制未接入。
+- 提交后调用系统对相同 Wi-Fi 重新探测；只有网络具备 VALIDATED 能力才记录成功。HTTP 200 本身不代表登录成功。没有确认联网时回到手动登录路径，保留系统登录入口，不会绕过认证或关闭系统联网探测。
+- 静默开关默认关闭。开启时暂停浏览器前台自动填表，避免两个流程并发提交；需要恢复旧模式时关闭静默开关并保存。修改配置通过受签名权限保护的广播通知系统观察器。
+- 每个 Network 至多一次尝试和 5 分钟冷却；网络消失或显式保存配置会重置该状态。认证 Cookie 仅存在于单次尝试内存中，用完清除。不记录账号密码或响应正文。
+- 此版本完成协议单元测试、构建和 Lint；未在用户 Wi-Fi 实测后台认证、系统框架启动兼容性或登录窗口抑制。建议保留旧版 APK，先手动验证实验开关；不用静默时无需勾选系统框架。
 
 ## 0.3.0 界面更新
 
@@ -24,7 +36,7 @@
 
 ## 行为和限制
 
-- Hook 限定 `com.android.browser` 内 `com.android.captiveportallogin.CaptivePortalLoginActivity` 的生命周期。
+- 前台模式 Hook 限定 `com.android.browser` 内 `com.android.captiveportallogin.CaptivePortalLoginActivity` 的生命周期。
 - JavaScript 同时验证 HTTPS 域名、1026 端口、同源 iframe、POST `/login`、输入框和按钮属于同一个表单。
 - 沿用实机验证的逐字 beforeinput/input、change、blur、等待、按钮 click 流程。保留门户原有表单脚本和隐藏字段，不直接构造认证请求。
 - 页面可见且准备就绪才开始。切到后台时暂停，交由用户手动完成，避免后台网页计时器造成不确定行为。
@@ -42,7 +54,8 @@
 ## 验证
 
 - `node tests/login.test.cjs`：模拟 DOM，验证逐字输入/失焦/单次点击、同源 iframe、冷却、额外条件及后台停止。
-- Java 编译、DEX 转换、APK 对齐与签名校验。
+- `./gradlew :app:testReleaseUnitTest`：6 个测试覆盖表单编码、隐藏值、RedirectUrl、同源限制、Cookie、单次提交与提交前取消。
+- Java/Kotlin 编译、DEX 转换、Android Lint、APK 对齐与签名校验。
 - 0.1.0 已在用户设备验证；0.3.0 界面完成编译与 Android Lint 检查，未在真实手机上运行或截图验证。登录 JS 保持 0.2.0 的实现。
 
 出现兼容性问题时，提供 LSPosed 日志中以 `PortalAuto:` 开头的行即可。日志不包含账号密码、JS 源码或认证参数。
@@ -54,7 +67,7 @@
 1. 配置 `ANDROID_HOME` 或 `local.properties` 中的 `sdk.dir`。
 2. 将 `https://api.xposed.info/de/robv/android/xposed/api/82/api-82.jar` 下载到 `toolchain/xposed.jar`。
 3. 可选：在 `signing/module.p12` 放置签名密钥，口令保存于 `signing/password`，别名 `module`。未提供密钥时生成未签名 APK，需要签名后才能安装；自建密钥不能覆盖原发行版。私钥及口令不上传仓库。
-4. 执行 `./gradlew :app:assembleRelease :app:lintRelease`，或 `bash build.sh`。
+4. 执行 `./gradlew :app:testReleaseUnitTest :app:assembleRelease :app:lintRelease`，或 `bash build.sh`。
 
 JS 会在构建时生成 Java 常量；不要手工编辑生成文件。发布 APK 由 R8 缩减，保留 LSPosed Hook 入口。第三方组件通知和 Apache 2.0 协议放在 APK assets 中。
 

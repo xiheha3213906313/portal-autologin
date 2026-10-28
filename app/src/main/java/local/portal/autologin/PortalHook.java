@@ -35,6 +35,21 @@ public class PortalHook implements IXposedHookLoadPackage {
     private static long nextAttempt;
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) throws Throwable {
+        if ("android".equals(p.packageName) && ("android".equals(p.processName) || "system_server".equals(p.processName))) {
+            try {
+                Class<?> server=XposedHelpers.findClass("com.android.server.SystemServer",p.classLoader);
+                XposedBridge.hookAllMethods(server,"startOtherServices",new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            Object thread=XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.app.ActivityThread",null),"currentActivityThread");
+                            android.content.Context context=(android.content.Context)XposedHelpers.callMethod(thread,"getSystemContext");
+                            SilentPortal.start(context);
+                        } catch(Throwable e) {logError("silent_start",e);}
+                    }
+                });
+            } catch(Throwable e) {logError("system_hook",e);}
+            return;
+        }
         if (!"com.android.browser".equals(p.packageName)) return;
         XposedBridge.log("PortalAuto: browser hook loaded");
         XposedHelpers.findAndHookMethod(Activity.class, "onResume", new XC_MethodHook() {
@@ -107,6 +122,9 @@ public class PortalHook implements IXposedHookLoadPackage {
                 prefs.reload();
                 if (!prefs.getBoolean("enabled", false)) {
                     XposedBridge.log("PortalAuto: disabled or configuration unavailable"); return;
+                }
+                if (prefs.getBoolean("silent", false)) {
+                    XposedBridge.log("PortalAuto: foreground autofill deferred to silent mode"); return;
                 }
                 String user = prefs.getString("username", "");
                 String pass = prefs.getString("password", "");

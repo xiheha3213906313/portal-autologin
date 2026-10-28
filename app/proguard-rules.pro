@@ -2,3 +2,5 @@
 -keep class local.portal.autologin.PortalHook$* { *; }
 -keep class * implements de.robv.android.xposed.IXposedHookLoadPackage { *; }
 -dontwarn de.robv.android.xposed.**
+-keep class local.portal.autologin.SilentPortal { *; }
+-keep class local.portal.autologin.SilentPortal$* { *; }

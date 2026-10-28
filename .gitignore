@@ -12,3 +12,4 @@
 .env.*
 /toolchain/*
 !/toolchain/SOURCES.txt
+/.kotlin/

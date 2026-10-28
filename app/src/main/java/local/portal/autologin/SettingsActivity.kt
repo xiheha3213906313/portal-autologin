@@ -1,6 +1,7 @@
 package local.portal.autologin
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.WindowManager
@@ -51,6 +52,7 @@ class SettingsActivity : ComponentActivity() {
         var password by remember { mutableStateOf(prefs?.getString("password", "") ?: "") }
         var enabled by remember { mutableStateOf(prefs?.getBoolean("enabled", false) ?: false) }
         var fast by remember { mutableStateOf(prefs?.getBoolean("fast", true) ?: true) }
+        var silent by remember { mutableStateOf(prefs?.getBoolean("silent", false) ?: false) }
         var showPassword by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         val confirmClear = remember { mutableStateOf(false) }
@@ -64,8 +66,9 @@ class SettingsActivity : ComponentActivity() {
             } else {
                 val ok = prefs.edit().putString("username", username.trim())
                     .putString("password", password).putBoolean("enabled", enabled)
-                    .putBoolean("fast", fast).commit()
+                    .putBoolean("fast", fast).putBoolean("silent", silent).commit()
                 if (ok) {
+                    notifyConfigChanged()
                     error = null
                     focus.clearFocus()
                     Toast.makeText(this@SettingsActivity, "已保存", Toast.LENGTH_SHORT).show()
@@ -89,6 +92,9 @@ class SettingsActivity : ComponentActivity() {
                         onCheckedChange = { enabled = it })
                     SuperSwitch(title = "快速填写", checked = fast, enabled = usable,
                         onCheckedChange = { fast = it })
+                    SuperSwitch(title = "静默登录", checked = silent, enabled = usable,
+                        summary = if (silent) "实验功能：勾选系统框架作用域后重启" else null,
+                        onCheckedChange = { silent = it })
                 }
                 Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(16.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -131,7 +137,8 @@ class SettingsActivity : ComponentActivity() {
                 TextButton(text = "清除", modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.textButtonColorsPrimary(), onClick = {
                         if (prefs?.edit()?.clear()?.commit() == true) {
-                            username = ""; password = ""; enabled = false; fast = true
+                            username = ""; password = ""; enabled = false; fast = true; silent = false
+                            notifyConfigChanged()
                             showPassword = false; error = null
                             confirmClear.value = false
                             Toast.makeText(this@SettingsActivity, "已清除", Toast.LENGTH_SHORT).show()
@@ -141,5 +148,8 @@ class SettingsActivity : ComponentActivity() {
                     })
             }
         }
+    }
+    private fun notifyConfigChanged() {
+        sendBroadcast(Intent(SilentPortal.ACTION).setPackage("android"))
     }
 }

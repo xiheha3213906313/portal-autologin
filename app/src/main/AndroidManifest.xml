@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <permission android:name="local.portal.autologin.permission.CONFIGURE" android:protectionLevel="signature" />
+  <uses-permission android:name="local.portal.autologin.permission.CONFIGURE" />
   <application android:label="门户自动登录" android:icon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
     <meta-data android:name="xposedmodule" android:value="true" />
     <meta-data android:name="xposeddescription" android:value="小米浏览器访客门户：本地配置、逐字输入、自动提交。" />
