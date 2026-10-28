@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:label="门户自动登录" android:icon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
+    <meta-data android:name="xposedmodule" android:value="true" />
+    <meta-data android:name="xposeddescription" android:value="小米浏览器访客门户：本地配置、逐字输入、自动提交。" />
+    <meta-data android:name="xposedminversion" android:value="93" />
+    <meta-data android:name="xposedsharedprefs" android:value="true" />
+    <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+    <activity android:name=".SettingsActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

@@ -1,0 +1,15 @@
+Miuix 0.5.1
+Copyright 2025 miuix-kotlin-multiplatform contributors
+Licensed under the Apache License, Version 2.0.
+https://github.com/miuix-kotlin-multiplatform/miuix
+https://www.apache.org/licenses/LICENSE-2.0
+
+AndroidX / Jetpack Compose
+Copyright The Android Open Source Project
+Licensed under the Apache License, Version 2.0.
+https://developer.android.com/jetpack/androidx
+
+Kotlin
+Copyright JetBrains s.r.o. and Kotlin Programming Language contributors
+Licensed under the Apache License, Version 2.0.
+https://kotlinlang.org/

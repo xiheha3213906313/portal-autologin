@@ -1,0 +1,14 @@
+/build/
+/dist/
+/signing/
+/.gradle/
+/app/build/
+/local.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+.env
+.env.*
+/toolchain/*
+!/toolchain/SOURCES.txt

@@ -1,0 +1,10 @@
+Required compile-only Xposed API:
+https://api.xposed.info/de/robv/android/xposed/api/82/api-82.jar -> xposed.jar
+
+Install Android SDK Platform 35 and Build Tools 35.0.0 with Android Studio
+or sdkmanager. Set ANDROID_HOME or sdk.dir in local.properties.
+The Gradle wrapper downloads Gradle 8.11.1. Use JDK 21.
+Gradle resolves Miuix and AndroidX from Maven Central and Google Maven.
+
+LSPosed shared preferences documentation:
+https://github.com/LSPosed/LSPosed/wiki/New-XSharedPreferences
