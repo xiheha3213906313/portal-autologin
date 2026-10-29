@@ -52,6 +52,7 @@ class SettingsActivity : ComponentActivity() {
     private var moduleAvailable = false
     private val xiaomiSystem = DeviceCompatibility.supportsModule(Build.BRAND, Build.MANUFACTURER)
     private var showSettings by mutableStateOf(false)
+    private var pendingSavedCheck by mutableStateOf(false)
     private var foreground by mutableStateOf(false)
     private var pendingLog: String? = null
     private var pendingInstallation: File? = null
@@ -99,6 +100,12 @@ class SettingsActivity : ComponentActivity() {
                     if (foreground && updates.consumeInstallationPrompt()) showUpdate.value = true
                 }
                 val state = login.state
+                LaunchedEffect(state.stage, state.offerForceLogin, pendingSavedCheck) {
+                    if (pendingSavedCheck && state.stage == AppLoginController.Stage.ERROR && state.offerForceLogin) {
+                        pendingSavedCheck = false
+                        showSettings = false
+                    }
+                }
                 val accountPage = showSettings || state.stage == AppLoginController.Stage.CONFIGURATION
                 SideEffect {
                     if (accountPage) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -109,7 +116,7 @@ class SettingsActivity : ComponentActivity() {
                     SettingsPage(prefs, updates, showUpdate, version)
                 } else {
                     LoginResultPage(state, login, moduleAvailable, xiaomiSystem,
-                        onSettings = { showSettings = true },
+                        onSettings = { pendingSavedCheck = false; showSettings = true },
                         onRetry = { login.retry() },
                         onWifi = {
                             val action = if (android.os.Build.VERSION.SDK_INT >= 29)
@@ -141,6 +148,7 @@ class SettingsActivity : ComponentActivity() {
         var password by remember { mutableStateOf(prefs.getString("password", "") ?: "") }
         var enabled by remember { mutableStateOf(prefs.getBoolean("enabled", false)) }
         var silent by remember { mutableStateOf(prefs.getBoolean("silent", false)) }
+        var forceLogin by remember { mutableStateOf(prefs.getBoolean("force_login", false)) }
         var debugLog by remember { mutableStateOf(prefs.getBoolean("debug_log", false)) }
         var showPassword by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(if (accountStore.initializationFailed ||
@@ -154,6 +162,7 @@ class SettingsActivity : ComponentActivity() {
         var savedPassword by remember { mutableStateOf(password) }
         var savedEnabled by remember { mutableStateOf(enabled) }
         var savedSilent by remember { mutableStateOf(silent) }
+        var savedForceLogin by remember { mutableStateOf(forceLogin) }
         val accountPicker = remember { mutableStateOf(false) }
         val confirmClear = remember { mutableStateOf(false) }
         val about = remember { mutableStateOf(false) }
@@ -162,7 +171,8 @@ class SettingsActivity : ComponentActivity() {
         val loginOptionsEnabled = xiaomiSystem && enabled
         val valid = username.isNotBlank() && password.isNotEmpty()
         val credentialsChanged = username.trim() != savedUsername || password != savedPassword
-        val optionsChanged = enabled != savedEnabled || silent != savedSilent
+        val ordinaryMode = !moduleAvailable || !xiaomiSystem
+        val optionsChanged = enabled != savedEnabled || silent != savedSilent || forceLogin != savedForceLogin
         val changed = credentialsChanged || optionsChanged
         val switchingSavedAccount = credentialsChanged && !optionsChanged && savedAccounts.any {
             it.username == username.trim() && it.password == password
@@ -176,28 +186,35 @@ class SettingsActivity : ComponentActivity() {
                 savedAccounts = accountStore.accounts
                 val ok = prefs.edit().putString("username", username.trim())
                     .putString("password", password).putBoolean("enabled", enabled)
-                    .putBoolean("silent", silent).commit()
+                    .putBoolean("silent", silent).putBoolean("force_login", forceLogin).commit()
                 if (ok) {
                     savedUsername = username.trim(); savedPassword = password
                     savedEnabled = enabled; savedSilent = silent
+                    savedForceLogin = forceLogin
                     notifyConfigChanged()
                     error = null
                     focus.clearFocus()
-                    if (login.isWifiOnline()) {
+                    if ((!ordinaryMode || !forceLogin) && login.isWifiOnline()) {
                         showSettings = true
                         savedFeedback = true
+                        pendingSavedCheck = true
                     } else {
                         savedFeedback = false
                         showSettings = false
-                        login.saved()
+                        pendingSavedCheck = false
                     }
+                    login.saved()
                 } else error = "保存失败，请重试"
             }
         }
         LaunchedEffect(savedFeedback) {
             if (savedFeedback) { delay(1800); savedFeedback=false }
         }
-        LaunchedEffect(username,password,enabled,silent) { savedFeedback=false }
+        LaunchedEffect(username,password,enabled,silent,forceLogin) {
+            savedFeedback=false
+            // A late background result must not discard a configuration being edited.
+            pendingSavedCheck=false
+        }
         LaunchedEffect(showUpdate.value) {
             if (showUpdate.value) { about.value = false; focus.clearFocus() }
         }
@@ -255,6 +272,11 @@ class SettingsActivity : ComponentActivity() {
                     SuperSwitch(title = "静默登录", checked = silent, enabled = loginOptionsEnabled,
                         summary = if (silent) "实验功能：勾选系统框架作用域后重启" else null,
                         onCheckedChange = { silent = it })
+                }
+                if (ordinaryMode) Card(modifier = Modifier.fillMaxWidth()) {
+                    SuperSwitch(title = "强制登录", checked = forceLogin,
+                        summary = "启动软件或保存配置时始终进行认证",
+                        onCheckedChange = { forceLogin = it })
                 }
                 Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(14.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -357,6 +379,7 @@ class SettingsActivity : ComponentActivity() {
                     colors = ButtonDefaults.textButtonColorsPrimary(), onClick = {
                         if (prefs.edit().clear().commit()) {
                             username = ""; password = ""; enabled = false; silent = false; debugLog = false
+                            forceLogin = false; savedForceLogin = false
                             selectedPreset = null; savedUsername = ""; savedPassword = ""
                             savedEnabled = false; savedSilent = false
                             notifyConfigChanged()

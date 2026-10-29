@@ -49,4 +49,17 @@ public class LoginAttemptsTest {
         assertEquals(ALLOW,a.begin(11,1500,-1,-1,false));a.finish(11,false);
         assertEquals(RECENT_SUBMISSION,a.begin(10,2000,-1,-1,false));
     }
+    @Test public void forcedLoginIgnoresPreviousSubmissionButStillMergesRunningAttempt() {
+        LoginAttempts a=new LoginAttempts();a.begin(10,1000,-1,-1,false);
+        a.submitted(10,1200);a.finish(10,false);
+        assertEquals(ALLOW,a.begin(10,1500,10,1200,true,true));
+        assertEquals(RUNNING,a.begin(10,1600,10,1200,true,true));
+        a.submitted(10,1700);a.finish(10,false);
+        assertEquals(RECENT_SUBMISSION,a.begin(10,1800,10,1700,true));
+    }
+    @Test public void forcedLoginAfterProcessRestartIgnoresPersistedCooldown() {
+        LoginAttempts a=new LoginAttempts();
+        assertEquals(ALLOW,a.begin(10,4000,10,2000,false,true));
+        assertEquals(RUNNING,a.begin(10,4100,10,2000,false,true));
+    }
 }

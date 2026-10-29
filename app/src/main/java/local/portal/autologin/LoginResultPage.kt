@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.extra.SuperSwitch
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -53,11 +55,21 @@ fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController
                 }
             }
             Text(state.message, fontSize = if (success) 30.sp else 22.sp,
-                fontWeight = FontWeight.Medium, color = foreground)
+                fontWeight = FontWeight.Medium, color = foreground, textAlign = TextAlign.Center)
+            if (state.detail.isNotBlank()) Text(state.detail, fontSize = 14.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
+            if (success && state.recommendForceLogin && login.ordinaryMode) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    SuperSwitch(title = "强制登录", checked = login.forceLoginEnabled,
+                        summary = if (login.forceLoginEnabled) "下次启动时自动认证" else "推荐开启，避免联网状态误判",
+                        onCheckedChange = { login.updateForceLogin(it) })
+                }
+            }
             if (!success && !connecting) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TextButton(text = "连接 Wi-Fi", onClick = onWifi, minHeight = 48.dp)
-                    TextButton(text = "重试", onClick = onRetry, minHeight = 48.dp,
+                    TextButton(text = if (state.offerForceLogin) "强制登录" else "重试",
+                        onClick = { if (state.offerForceLogin) login.forceLogin() else onRetry() }, minHeight = 48.dp,
                         colors = ButtonDefaults.textButtonColorsPrimary())
                 }
             }

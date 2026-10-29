@@ -17,11 +17,14 @@ final class LoginAttempts {
     private final LinkedHashMap<Long, Entry> entries = new LinkedHashMap<>();
 
     synchronized Decision begin(long network, long now, long savedNetwork, long savedTime, boolean retry) {
+        return begin(network,now,savedNetwork,savedTime,retry,false);
+    }
+    synchronized Decision begin(long network, long now, long savedNetwork, long savedTime, boolean retry, boolean force) {
         Entry e = entries.get(network);
         if (e != null && e.running) return Decision.RUNNING;
-        if (network == savedNetwork && recent(now, savedTime, SUBMISSION_COOLDOWN))
+        if (!force && network == savedNetwork && recent(now, savedTime, SUBMISSION_COOLDOWN))
             return Decision.RECENT_SUBMISSION;
-        if (e != null && recent(now, e.time, e.submitted ? SUBMISSION_COOLDOWN : FAILURE_COOLDOWN)) {
+        if (!force && e != null && recent(now, e.time, e.submitted ? SUBMISSION_COOLDOWN : FAILURE_COOLDOWN)) {
             if (e.submitted) return Decision.RECENT_SUBMISSION;
             if (!retry) return Decision.RECENT_FAILURE;
         }

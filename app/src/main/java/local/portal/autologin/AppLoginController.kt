@@ -25,14 +25,20 @@ import java.util.concurrent.TimeUnit
 class AppLoginController private constructor(private val context: Context) {
     enum class Stage { CONFIGURATION, CONNECTING, SUCCESS, ERROR }
     data class UiState(val stage: Stage = Stage.CONFIGURATION, val message: String = "",
-                       val successId: Long = 0)
+                       val successId: Long = 0, val detail: String = "",
+                       val offerForceLogin: Boolean = false, val recommendForceLogin: Boolean = false)
     var state by mutableStateOf(UiState())
         private set
     private val cm = context.getSystemService(ConnectivityManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
         ArrayBlockingQueue<Runnable>(2), { r -> Thread(r, "PortalAppAuth").apply { isDaemon = true } })
+    private val verifier = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
+        ArrayBlockingQueue<Runnable>(2), { r -> Thread(r, "PortalInternetCheck").apply { isDaemon = true } })
     private val attempts = LoginAttempts()
+    var forceLoginEnabled by mutableStateOf(false)
+        private set
+    val ordinaryMode: Boolean get() = !moduleAvailable
     private val history = UnifiedPreferences.open(context,"app_login")
     private lateinit var prefs: SharedPreferences
     private var moduleAvailable = false
@@ -43,10 +49,15 @@ class AppLoginController private constructor(private val context: Context) {
     private var successSequence = 0L
     private var animatedSuccess = -1L
 
-    private class Job(val network: Network) {
+    private class Job(val network: Network, val force: Boolean = false,
+                      val verificationOnly: Boolean = false) {
         @Volatile var active = true
         @Volatile var submitted = false
         @Volatile var credentialsWritten = false
+        var checkingInternet = false
+        var internetChecks = 0
+        var verificationRetry: Runnable? = null
+        var authenticationFinished = false
         var bridgeClaimed = false
         var submittedAt = -1L
         var timeout: Runnable? = null
@@ -54,16 +65,26 @@ class AppLoginController private constructor(private val context: Context) {
 
     fun enterForeground(preferences: SharedPreferences, hasModule: Boolean) {
         prefs = preferences; moduleAvailable = hasModule; foreground = true
+        forceLoginEnabled = prefs.getBoolean("force_login", false)
         DiagnosticLog.setEnabled(prefs.getBoolean("debug_log", false))
         check(false)
     }
     fun leaveForeground() { foreground = false }
     fun saved() {
+        forceLoginEnabled = prefs.getBoolean("force_login", false)
         DiagnosticLog.setEnabled(prefs.getBoolean("debug_log", false))
         current?.let { job -> synchronized(job) { if (!job.submitted) finish(job) } }
         check(true)
     }
     fun retry() = check(true)
+    fun forceLogin() = check(true, oneShotForce = true)
+    fun updateForceLogin(value: Boolean) {
+        if (moduleAvailable) return
+        if (prefs.edit().putBoolean("force_login", value).commit()) {
+            forceLoginEnabled = value
+            DiagnosticLog.event("app.force_setting", if (value) 1 else 0)
+        } else state = state.copy(detail = "设置保存失败，请重试")
+    }
     fun isWifiOnline(): Boolean = runCatching { wifi()?.let { validated(it) } == true }.getOrDefault(false)
     fun consumeSuccessAnimation(id: Long): Boolean {
         if (animatedSuccess == id) return false
@@ -95,58 +116,84 @@ class AppLoginController private constructor(private val context: Context) {
             it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     } == true
 
-    private fun check(retry: Boolean) {
+    private fun connected(n: Network): Boolean = cm.getNetworkCapabilities(n)?.let {
+        it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    } == true
+
+    private fun check(retry: Boolean, oneShotForce: Boolean = false) {
         if (!configured()) { clear(); return }
         val network = runCatching { wifi() }.getOrNull()
         if (network == null) {
             current?.let { finish(it) }
             successfulNetwork = null
             state = UiState(Stage.ERROR, "请先连接 Wi-Fi")
+            DiagnosticLog.event("app.no_wifi", 0)
             return
         }
-        if (success(network)) return
+        val force = ordinaryMode && (oneShotForce || forceLoginEnabled)
         current?.let {
-            if (it.network == network && it.active) return
+            // A forced click may replace a passive check, but never a running authentication.
+            if (it.network == network && it.active && !(force && it.verificationOnly)) return
             finish(it)
+        }
+        if (!force && validated(network)) {
+            val job = Job(network, verificationOnly = true)
+            current = job
+            showOnline(job, confirmed = false)
+            DiagnosticLog.event("app.system_validated", 1)
+            if (!startObservation(job, 20000)) return
+            verifyInternet(job)
+            return
         }
         successfulNetwork = null
         val handle = network.networkHandle
         val sameBoot = history.getInt("submitted_boot", -2) == bootCount()
         val decision = attempts.begin(handle, SystemClock.elapsedRealtime(),
             history.getLong("submitted_network", -1),
-            if (sameBoot) history.getLong("submitted_at", -1) else -1, retry)
+            if (sameBoot) history.getLong("submitted_at", -1) else -1, retry, force)
+        DiagnosticLog.event("app.attempt_decision", decision.ordinal)
         if (decision == LoginAttempts.Decision.RECENT_FAILURE) {
-            state = UiState(Stage.ERROR, "暂时无法登录，请检查 Wi-Fi 后重试")
+            state = UiState(Stage.ERROR, "暂时无法登录，请检查 Wi-Fi 后重试", offerForceLogin = ordinaryMode)
             return
         }
         if (decision == LoginAttempts.Decision.RUNNING) return
-        val job = Job(network)
+        val job = Job(network, force)
         current = job
-        state = UiState(Stage.CONNECTING, "正在连接")
-        DiagnosticLog.event("app.attempt_started", 0)
-        try { observe(job) } catch (e: Exception) {
-            DiagnosticLog.failure(e); fail(job, "暂时无法检查 Wi-Fi 状态"); return
-        }
-        if (current !== job || !job.active) return
-        job.timeout = Runnable {
-            if (current !== job || !job.active) return@Runnable
-            if (!success(network)) fail(job,
-                if (job.submitted) "尚未确认联网，请稍后重试" else "连接超时，请检查 Wi-Fi")
-        }.also { main.postDelayed(it, if (decision == LoginAttempts.Decision.RECENT_SUBMISSION) 10000 else 45000) }
+        state = UiState(Stage.CONNECTING, if (force) "正在强制登录" else "正在连接")
+        DiagnosticLog.event("app.attempt_started", if (force) 1 else 0)
+        if (!startObservation(job, if (decision == LoginAttempts.Decision.RECENT_SUBMISSION) 20000 else 45000)) return
         if (decision == LoginAttempts.Decision.RECENT_SUBMISSION) {
             job.submitted = true
+            job.authenticationFinished = true
             state = UiState(Stage.CONNECTING, "正在确认联网状态")
+            verifyInternet(job)
             probe(network)
             return
         }
         claimModule(job) { authenticate(job) }
     }
 
+    private fun startObservation(job: Job, timeoutMs: Long): Boolean {
+        try { observe(job) } catch (e: Exception) {
+            DiagnosticLog.failure(e); fail(job, "暂时无法检查 Wi-Fi 状态"); return false
+        }
+        job.timeout = Runnable {
+            if (current !== job || !job.active) return@Runnable
+            DiagnosticLog.event("app.attempt_timeout", if (job.submitted) 1 else 0)
+            verificationFailed(job, "暂时无法确认当前 Wi-Fi 的互联网连接")
+        }.also { main.postDelayed(it, timeoutMs) }
+        return true
+    }
+
     private fun observe(job: Job) {
         val observer = object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(n: Network, caps: NetworkCapabilities) {
                 if (current !== job || !job.active || n != job.network) return
-                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) success(n)
+                DiagnosticLog.event("app.network_capabilities",
+                    (if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) 2 else 0) or
+                    (if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)) 1 else 0))
+                // A cached VALIDATED bit must never finish a forced POST or prove internet access.
+                if (job.authenticationFinished || job.verificationOnly) verifyInternet(job)
             }
             override fun onLost(n: Network) {
                 if (current === job && job.active && n == job.network) fail(job, "Wi-Fi 已断开")
@@ -155,12 +202,59 @@ class AppLoginController private constructor(private val context: Context) {
         callback = observer
         cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), observer, main)
-        if (validated(job.network)) success(job.network)
+    }
+
+    private fun verifyInternet(job: Job) {
+        if (current !== job || !job.active || job.checkingInternet) return
+        job.verificationRetry?.let { main.removeCallbacks(it) }
+        job.verificationRetry = null
+        job.checkingInternet = true
+        job.internetChecks++
+        DiagnosticLog.event("app.internet.started", if (job.verificationOnly) 0 else 1)
+        try { verifier.execute {
+            val result = InternetCheck({ url -> job.network.openConnection(url) as HttpURLConnection }, {
+                job.active && connected(job.network)
+            }, { stage, detail -> DiagnosticLog.event("app.$stage", detail) }).run()
+            main.post {
+                if (current !== job || !job.active) return@post
+                job.checkingInternet = false
+                DiagnosticLog.event("app.internet.result", result.ordinal)
+                // Never apply a completed check to a different Wi-Fi after a network switch.
+                if (!connected(job.network) || wifi() != job.network) {
+                    fail(job, "Wi-Fi 已切换，请重试")
+                } else if (job.submitted && result != InternetCheck.Result.ONLINE &&
+                    result != InternetCheck.Result.CANCELLED && job.internetChecks < 3) {
+                    // Gateways can release traffic shortly after the POST. Three bounded checks,
+                    // never another POST or a permanent connectivity poll.
+                    job.verificationRetry = Runnable { verifyInternet(job) }.also {
+                        main.postDelayed(it, if (job.internetChecks == 1) 1000 else 2500)
+                    }
+                } else when (result) {
+                    InternetCheck.Result.ONLINE -> showOnline(job, confirmed = true)
+                    InternetCheck.Result.CAPTIVE -> verificationFailed(job, "当前 Wi-Fi 仍需认证或访问受限")
+                    InternetCheck.Result.UNAVAILABLE -> verificationFailed(job, "暂时无法确认当前 Wi-Fi 的互联网连接")
+                    else -> fail(job, "Wi-Fi 已断开")
+                }
+            }
+        } } catch (e: Exception) {
+            DiagnosticLog.failure(e)
+            verificationFailed(job, "暂时无法检查互联网连接，请重试")
+        }
+    }
+
+    private fun verificationFailed(job: Job, detail: String) {
+        if (current !== job) return
+        val submitted = job.submitted
+        finish(job)
+        successfulNetwork = null
+        state = UiState(Stage.ERROR, if (submitted) "登录失败" else "未进行登录",
+            detail = detail, offerForceLogin = ordinaryMode && connected(job.network))
     }
 
     private fun claimModule(job: Job, ready: () -> Unit) {
         if (current !== job || !job.active) return
         if (!moduleAvailable) {
+            DiagnosticLog.event("app.module_not_required", 0)
             ready(); return
         }
         context.sendOrderedBroadcast(Intent(APP_BEGIN).setPackage("android")
@@ -171,11 +265,14 @@ class AppLoginController private constructor(private val context: Context) {
                         Intent(APP_END).setPackage("android").putExtra("network", job.network))
                     return
                 }
+                DiagnosticLog.event("app.module_claim_result", resultCode)
                 when (resultCode) {
                     BRIDGE_GRANTED -> { job.bridgeClaimed = true; ready() }
                     BRIDGE_BUSY -> {
                         runCatching { rememberSubmission(job) }.onFailure { DiagnosticLog.failure(it) }
+                        job.authenticationFinished = true
                         state = UiState(Stage.CONNECTING, "正在确认联网状态")
+                        verifyInternet(job)
                         probe(job.network)
                     }
                     else -> {
@@ -195,11 +292,11 @@ class AppLoginController private constructor(private val context: Context) {
         try { worker.execute {
             try {
                 PortalHttpClient({ url -> job.network.openConnection(url) as HttpURLConnection }, {
-                    job.active && !validated(job.network) && cm.getNetworkCapabilities(job.network) != null
+                    job.active && (job.force || !validated(job.network)) && connected(job.network)
                 }, { stage, detail ->
                     DiagnosticLog.event("app.$stage", detail)
                     if (stage == "submit.write_begin") {
-                        if (!job.active || validated(job.network)) throw IOException("attempt_cancelled")
+                        if (!job.active || (!job.force && validated(job.network))) throw IOException("attempt_cancelled")
                         rememberSubmission(job)
                     }
                     if (stage == "submit.write_complete") job.credentialsWritten = true
@@ -212,11 +309,10 @@ class AppLoginController private constructor(private val context: Context) {
                 val rejected = e.message == "login_form_returned" || e.message == "authentication_rejected"
                 main.post {
                     if (current !== job || !job.active) return@post
-                    if (success(job.network)) return@post
                     if (rejected) {
                         forgetRejectedSubmission(job)
                         fail(job, "登录未通过，请检查账号和密码", true)
-                    } else if (job.submitted) submitted(job)
+                    } else if (job.submitted || (!job.force && validated(job.network))) submitted(job)
                     else fail(job, "暂时无法登录，请检查 Wi-Fi 后重试")
                 }
             }
@@ -247,34 +343,41 @@ class AppLoginController private constructor(private val context: Context) {
     }
     private fun submitted(job: Job) {
         if (current !== job || !job.active) return
-        if (success(job.network)) return
+        job.authenticationFinished = true
         state = UiState(Stage.CONNECTING, "正在确认联网状态")
+        verifyInternet(job)
         probe(job.network)
     }
     private fun probe(network: Network) {
         runCatching { cm.reportNetworkConnectivity(network, true) }.onFailure { DiagnosticLog.failure(it) }
     }
-    private fun success(network: Network): Boolean {
-        if (!validated(network)) return false
-        val newlyAuthenticated = current?.let { it.network == network && it.credentialsWritten } == true
-        current?.let { finish(it) }
-        if (successfulNetwork == network && state.stage == Stage.SUCCESS) return true
-        successfulNetwork = network
-        state = UiState(Stage.SUCCESS, if (newlyAuthenticated) "登录成功" else "已联网", ++successSequence)
-        DiagnosticLog.event("app.validated", if (newlyAuthenticated) 1 else 0)
-        DiagnosticLog.event(if (newlyAuthenticated) "app.authenticated" else "app.already_online", 0)
-        if (!foreground) DiagnosticLog.event("app.completed_in_background", 0)
-        return true
+    private fun showOnline(job: Job, confirmed: Boolean) {
+        if (current !== job || !job.active) return
+        val newlyAuthenticated = confirmed && job.credentialsWritten
+        val recommend = ordinaryMode && ((job.force && newlyAuthenticated) ||
+            (successfulNetwork == job.network && state.recommendForceLogin))
+        val sequence = if (successfulNetwork == job.network && state.stage == Stage.SUCCESS)
+            state.successId else ++successSequence
+        successfulNetwork = job.network
+        state = UiState(Stage.SUCCESS, if (newlyAuthenticated && !job.force) "登录成功" else "已联网",
+            sequence, recommendForceLogin = recommend)
+        DiagnosticLog.event(if (confirmed) "app.internet_confirmed" else "app.already_online", 0)
+        if (newlyAuthenticated) DiagnosticLog.event("app.authenticated", if (job.force) 1 else 0)
+        if (confirmed) {
+            finish(job)
+            if (!foreground) DiagnosticLog.event("app.completed_in_background", 0)
+        }
     }
     private fun fail(job: Job, message: String, rejected: Boolean = false) {
         if (current !== job) return
         finish(job, rejected)
-        state = UiState(Stage.ERROR, message)
+        state = UiState(Stage.ERROR, message, offerForceLogin = ordinaryMode && connected(job.network))
     }
     private fun finish(job: Job, rejected: Boolean = false) = synchronized(job) {
         job.active = false
         job.timeout?.let { main.removeCallbacks(it) }
-        attempts.finish(job.network.networkHandle, rejected)
+        job.verificationRetry?.let { main.removeCallbacks(it) }
+        if (!job.verificationOnly) attempts.finish(job.network.networkHandle, rejected)
         if (job.bridgeClaimed) context.sendBroadcast(Intent(APP_END).setPackage("android")
             .putExtra("network", job.network).putExtra("submitted", job.submitted && !rejected))
         if (current === job) {
