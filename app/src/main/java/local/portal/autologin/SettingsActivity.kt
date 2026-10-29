@@ -250,9 +250,9 @@ class SettingsActivity : ComponentActivity() {
                     Box(modifier = Modifier.fillMaxHeight().widthIn(min = 48.dp)
                         .clickable(role = Role.Button) {
                             focus.clearFocus()
-                            if (hasUpdate) showUpdate.value = true else about.value = true
+                            about.value = true
                         }
-                        .padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        .padding(start = 12.dp, end = if (hasUpdate) 4.dp else 12.dp), contentAlignment = Alignment.Center) {
                         Text(if (hasUpdate) "发现新版本！" else "关于", fontSize = 14.sp,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     }
@@ -422,12 +422,13 @@ class SettingsActivity : ComponentActivity() {
                     AboutLink("帮助我们", "分享你的账号密码") { about.value = false; sharing = true }
                 }
                 TextButton(text = when {
-                    updates.checking -> "检查中…"
                     updates.downloading -> "查看下载进度"
                     updates.ready != null -> "安装更新"
-                    hasUpdate -> "查看更新"
+                    hasUpdate -> "发现新版本"
+                    updates.checking -> "检查中…"
                     else -> "检查更新"
-                }, enabled = !updates.checking, modifier = Modifier.fillMaxWidth(),
+                }, enabled = !updates.checking || hasUpdate || updates.downloading || updates.ready != null,
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         if (updates.downloading || updates.ready != null || hasUpdate) { about.value = false; showUpdate.value = true }
                         else updates.check(version)
