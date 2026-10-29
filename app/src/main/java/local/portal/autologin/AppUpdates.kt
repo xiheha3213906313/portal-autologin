@@ -18,7 +18,7 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
-/** User-triggered release checks and bounded APK downloads; no account data or auth headers. */
+/** Startup/manual release checks and bounded APK downloads; no account data or auth headers. */
 internal class AppUpdates private constructor(private val context: Context) {
     data class Release(val version: String, val notes: String, val page: String, val apk: String?)
     data class CheckResult(val available: Boolean, val message: String)
@@ -30,6 +30,8 @@ internal class AppUpdates private constructor(private val context: Context) {
     var ready by mutableStateOf<File?>(null); private set
     var downloadError by mutableStateOf<String?>(null); private set
     private var installationPromptPending = false
+    private var retryAutomaticOnConnection = false
+    private var automaticFailed = false
     private val main = Handler(Looper.getMainLooper())
     private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
         ArrayBlockingQueue<Runnable>(2), { r -> Thread(r, "PortalUpdates").apply { isDaemon = true } })
@@ -43,9 +45,30 @@ internal class AppUpdates private constructor(private val context: Context) {
         return true
     }
 
-    fun check(currentVersion: String) {
-        if (checking || downloading) return
-        checking = true; checkResult = null; ready = null; installationPromptPending = false; downloadError = null
+    fun hasUpdate(currentVersion: String): Boolean = release?.let {
+        ReleaseRules.compareVersions(it.version, currentVersion) > 0
+    } == true
+
+    fun checkOnStart(currentVersion: String) {
+        if (checking || downloading || ready != null) return
+        retryAutomaticOnConnection = true
+        check(currentVersion, automatic = true)
+    }
+
+    fun retryOnConnection(currentVersion: String) {
+        if (!retryAutomaticOnConnection || checking || !automaticFailed) return
+        retryAutomaticOnConnection = false
+        check(currentVersion, automatic = true)
+    }
+
+    fun check(currentVersion: String, automatic: Boolean = false) {
+        if (checking || downloading || (automatic && ready != null)) return
+        if (!automatic) {
+            retryAutomaticOnConnection = false
+            checkResult = null; ready = null; installationPromptPending = false; downloadError = null
+        }
+        automaticFailed = false
+        checking = true
         worker.execute {
             try {
                 val json = JSONObject(metadata())
@@ -69,11 +92,14 @@ internal class AppUpdates private constructor(private val context: Context) {
                 val notes = body.substringAfter("## 更新内容", body).substringBefore("\n## ").trim().take(2000)
                 val item = Release(tag.removePrefix("v").removePrefix("V"), notes, page, apk)
                 main.post {
-                    release = item; checking = false
-                    checkResult = CheckResult(newer, if (newer) "发现新版本" else "已是最新版本")
+                    release = item; automaticFailed = false; checking = false
+                    if (!automatic) checkResult = CheckResult(newer, if (newer) "发现新版本" else "已是最新版本")
                 }
             } catch (_: Exception) {
-                main.post { checking = false; checkResult = CheckResult(false, "检查更新失败，请稍后重试") }
+                main.post {
+                    automaticFailed = automatic; checking = false
+                    if (!automatic) checkResult = CheckResult(false, "检查更新失败，请稍后重试")
+                }
             }
         }
     }

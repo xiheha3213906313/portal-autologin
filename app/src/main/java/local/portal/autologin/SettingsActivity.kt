@@ -100,6 +100,10 @@ class SettingsActivity : ComponentActivity() {
                     if (foreground && updates.consumeInstallationPrompt()) showUpdate.value = true
                 }
                 val state = login.state
+                LaunchedEffect(state.internetConfirmed, updates.checking, foreground) {
+                    if (foreground && state.internetConfirmed && !updates.checking)
+                        updates.retryOnConnection(version)
+                }
                 LaunchedEffect(state.stage, state.offerForceLogin, pendingSavedCheck) {
                     if (pendingSavedCheck && state.stage == AppLoginController.Stage.ERROR && state.offerForceLogin) {
                         pendingSavedCheck = false
@@ -128,6 +132,11 @@ class SettingsActivity : ComponentActivity() {
                     install = ::installUpdate, openBrowser = ::openBrowser)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppUpdates.get(this).checkOnStart(DiagnosticLog.VERSION)
     }
 
     override fun onResume() {
@@ -168,6 +177,7 @@ class SettingsActivity : ComponentActivity() {
         val about = remember { mutableStateOf(false) }
         var sharing by remember { mutableStateOf(false) }
         val focus = LocalFocusManager.current
+        val hasUpdate = updates.hasUpdate(version)
         val loginOptionsEnabled = xiaomiSystem && enabled
         val valid = username.isNotBlank() && password.isNotEmpty()
         val credentialsChanged = username.trim() != savedUsername || password != savedPassword
@@ -238,9 +248,13 @@ class SettingsActivity : ComponentActivity() {
                     Text("门户登录", fontSize = MiuixTheme.textStyles.title1.fontSize,
                         fontWeight = FontWeight.Normal, modifier = Modifier.weight(1f))
                     Box(modifier = Modifier.fillMaxHeight().widthIn(min = 48.dp)
-                        .clickable(role = Role.Button) { focus.clearFocus(); about.value = true }
+                        .clickable(role = Role.Button) {
+                            focus.clearFocus()
+                            if (hasUpdate) showUpdate.value = true else about.value = true
+                        }
                         .padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                        Text("关于", fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        Text(if (hasUpdate) "发现新版本！" else "关于", fontSize = 14.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     }
                 }
             }
@@ -275,7 +289,7 @@ class SettingsActivity : ComponentActivity() {
                 }
                 if (ordinaryMode) Card(modifier = Modifier.fillMaxWidth()) {
                     SuperSwitch(title = "强制登录", checked = forceLogin,
-                        summary = "启动软件或保存配置时始终进行认证",
+                        summary = if (forceLogin) "启动软件或保存配置时始终进行认证" else null,
                         onCheckedChange = { forceLogin = it })
                 }
                 Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(14.dp)) {
@@ -411,10 +425,11 @@ class SettingsActivity : ComponentActivity() {
                     updates.checking -> "检查中…"
                     updates.downloading -> "查看下载进度"
                     updates.ready != null -> "安装更新"
+                    hasUpdate -> "查看更新"
                     else -> "检查更新"
                 }, enabled = !updates.checking, modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        if (updates.downloading || updates.ready != null) { about.value = false; showUpdate.value = true }
+                        if (updates.downloading || updates.ready != null || hasUpdate) { about.value = false; showUpdate.value = true }
                         else updates.check(version)
                     })
                 TextButton(text = "关闭", onClick = { about.value = false },

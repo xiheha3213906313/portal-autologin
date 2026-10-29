@@ -26,7 +26,8 @@ class AppLoginController private constructor(private val context: Context) {
     enum class Stage { CONFIGURATION, CONNECTING, SUCCESS, ERROR }
     data class UiState(val stage: Stage = Stage.CONFIGURATION, val message: String = "",
                        val successId: Long = 0, val detail: String = "",
-                       val offerForceLogin: Boolean = false, val recommendForceLogin: Boolean = false)
+                       val offerForceLogin: Boolean = false, val recommendForceLogin: Boolean = false,
+                       val internetConfirmed: Boolean = false)
     var state by mutableStateOf(UiState())
         private set
     private val cm = context.getSystemService(ConnectivityManager::class.java)
@@ -360,7 +361,7 @@ class AppLoginController private constructor(private val context: Context) {
             state.successId else ++successSequence
         successfulNetwork = job.network
         state = UiState(Stage.SUCCESS, if (newlyAuthenticated && !job.force) "登录成功" else "已联网",
-            sequence, recommendForceLogin = recommend)
+            sequence, recommendForceLogin = recommend, internetConfirmed = confirmed)
         DiagnosticLog.event(if (confirmed) "app.internet_confirmed" else "app.already_online", 0)
         if (newlyAuthenticated) DiagnosticLog.event("app.authenticated", if (job.force) 1 else 0)
         if (confirmed) {

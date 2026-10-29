@@ -61,7 +61,7 @@ fun LoginResultPage(state: AppLoginController.UiState, login: AppLoginController
             if (success && state.recommendForceLogin && login.ordinaryMode) {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     SuperSwitch(title = "强制登录", checked = login.forceLoginEnabled,
-                        summary = if (login.forceLoginEnabled) "下次启动时自动认证" else "推荐开启，避免联网状态误判",
+                        summary = if (login.forceLoginEnabled) "下次启动时自动认证" else "推荐开启",
                         onCheckedChange = { login.updateForceLogin(it) })
                 }
             }
