@@ -6,6 +6,18 @@ import java.net.*;
 import java.util.*;
 
 public class ProjectLinksTest {
+    @Test public void historyMetadataUsesOnlyExactProjectUrlsAndBoundedPages() {
+        assertTrue(ProjectLinks.metadataUrl(ProjectLinks.LATEST_API));
+        assertTrue(ProjectLinks.metadataUrl(ProjectLinks.releasesApi(1)));
+        assertTrue(ProjectLinks.metadataUrl(ProjectLinks.releasesApi(ReleaseHistory.MAX_PAGES)));
+        for(String value:Arrays.asList(ProjectLinks.LATEST_API+"?page=1",
+            ProjectLinks.releasesApi(1).replace("api.github.com","evil.example"),
+            ProjectLinks.releasesApi(1).replace("https:","http:"),
+            ProjectLinks.releasesApi(1)+"&unexpected=true"))assertFalse(ProjectLinks.metadataUrl(value));
+        for(int page:Arrays.asList(0,ReleaseHistory.MAX_PAGES+1)) {
+            try{ProjectLinks.releasesApi(page);fail();}catch(IllegalArgumentException expected){}
+        }
+    }
     private Map<String,String> query(String url) throws Exception {
         Map<String,String> q=new HashMap<>();
         for(String part:new URI(url).getRawQuery().split("&")) {

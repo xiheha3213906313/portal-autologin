@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -20,7 +21,8 @@ import java.util.concurrent.TimeUnit
 
 /** Startup/manual release checks and bounded APK downloads; no account data or auth headers. */
 internal class AppUpdates private constructor(private val context: Context) {
-    data class Release(val version: String, val notes: String, val page: String, val apk: String?)
+    data class Release(val version: String, val notes: String, val page: String, val apk: String?,
+                       val notesComplete: Boolean = true)
     data class CheckResult(val available: Boolean, val message: String)
     var checking by mutableStateOf(false); private set
     var release by mutableStateOf<Release?>(null); private set
@@ -71,13 +73,14 @@ internal class AppUpdates private constructor(private val context: Context) {
         checking = true
         worker.execute {
             try {
-                val json = JSONObject(metadata())
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45)
+                val json = JSONObject(metadata(ProjectLinks.LATEST_API, deadline).text)
                 if (json.optBoolean("draft") || json.optBoolean("prerelease")) throw IOException("invalid_release")
                 val tag = json.getString("tag_name")
                 val newer = ReleaseRules.compareVersions(tag, currentVersion) > 0
                 val page = json.getString("html_url")
                 if (!ReleaseRules.releasePage(page)) throw IOException("invalid_release")
-                val body = json.optString("body")
+                val body = if (json.isNull("body")) "" else json.optString("body")
                 val assets = json.optJSONArray("assets")
                 var apk: String? = null
                 if (assets != null) for (i in 0 until assets.length()) {
@@ -89,8 +92,21 @@ internal class AppUpdates private constructor(private val context: Context) {
                     }
                 }
                 if (apk == null) apk = ReleaseRules.markdownDownload(body)
-                val notes = body.substringAfter("## 更新内容", body).substringBefore("\n## ").trim().take(2000)
-                val item = Release(tag.removePrefix("v").removePrefix("V"), notes, page, apk)
+                val history = ReleaseHistory.collect(currentVersion,
+                    ReleaseHistory.Entry(tag, body, false, false)) { number ->
+                    val response = metadata(ProjectLinks.releasesApi(number), deadline)
+                    val array = JSONArray(response.text)
+                    val entries = mutableListOf<ReleaseHistory.Entry>()
+                    for (index in 0 until array.length()) {
+                        val entry = array.optJSONObject(index) ?: continue
+                        if (!ReleaseRules.releasePage(entry.optString("html_url"))) continue
+                        val notes = if (entry.isNull("body")) "" else entry.optString("body")
+                        entries += ReleaseHistory.Entry(entry.optString("tag_name"), notes,
+                            entry.optBoolean("draft"), entry.optBoolean("prerelease"))
+                    }
+                    ReleaseHistory.Page(entries, response.hasNext || array.length() == ReleaseHistory.PAGE_SIZE)
+                }
+                val item = Release(tag.removePrefix("v").removePrefix("V"), history.notes, page, apk, history.complete)
                 main.post {
                     release = item; automaticFailed = false; checking = false
                     if (!automatic) checkResult = CheckResult(newer, if (newer) "发现新版本" else "已是最新版本")
@@ -104,12 +120,16 @@ internal class AppUpdates private constructor(private val context: Context) {
         }
     }
 
-    private fun connection(initial: String, metadata: Boolean = false): HttpURLConnection {
-        if (metadata) require(initial == ProjectLinks.LATEST_API) else require(ReleaseRules.download(initial))
+    private fun connection(initial: String, metadata: Boolean = false, deadline: Long = Long.MAX_VALUE): HttpURLConnection {
+        if (metadata) require(ProjectLinks.metadataUrl(initial)) else require(ReleaseRules.download(initial))
         var url = URL(initial)
         repeat(6) {
+            val remaining = if (metadata) TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()) else 15000L
+            if (remaining <= 0) throw IOException("metadata_timeout")
             val c = url.openConnection() as HttpURLConnection
-            c.connectTimeout = 10000; c.readTimeout = 15000; c.instanceFollowRedirects = false
+            c.connectTimeout = minOf(10000L, remaining).toInt()
+            c.readTimeout = minOf(15000L, remaining).toInt()
+            c.instanceFollowRedirects = false
             c.setRequestProperty("User-Agent", "PortalAuto/${DiagnosticLog.VERSION}")
             c.setRequestProperty("Accept", if (metadata) "application/vnd.github+json" else "application/octet-stream")
             if (!metadata) c.setRequestProperty("Accept-Encoding", "identity")
@@ -128,10 +148,11 @@ internal class AppUpdates private constructor(private val context: Context) {
         throw IOException("redirect_limit")
     }
 
-    private fun metadata(): String {
-        val c = connection(ProjectLinks.LATEST_API, true)
+    private data class Metadata(val text: String, val hasNext: Boolean)
+    private fun metadata(url: String, deadline: Long): Metadata {
+        if (System.nanoTime() >= deadline) throw IOException("metadata_timeout")
+        val c = connection(url, true, deadline)
         try {
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25)
             val out = java.io.ByteArrayOutputStream()
             c.inputStream.use { input ->
                 val buffer = ByteArray(8192)
@@ -141,7 +162,9 @@ internal class AppUpdates private constructor(private val context: Context) {
                     out.write(buffer, 0, n)
                 }
             }
-            return out.toString("UTF-8")
+            val more = Regex("rel\\s*=\\s*\"next\"").containsMatchIn(c.getHeaderField("Link").orEmpty())
+            // Only the existence of another page is used; requests always use our own API URL.
+            return Metadata(out.toString("UTF-8"), more)
         } finally { c.disconnect() }
     }
 

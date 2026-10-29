@@ -32,6 +32,9 @@ internal fun UpdateCard(show: MutableState<Boolean>, updates: AppUpdates, curren
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (release.notes.isNotBlank()) Text(release.notes, fontSize=14.sp,
                 modifier=Modifier.heightIn(max=180.dp).verticalScroll(rememberScrollState()))
+            if (!release.notesComplete) TextButton(text="部分记录未加载，查看全部更新",
+                modifier=Modifier.fillMaxWidth(), onClick={openBrowser(ProjectLinks.RELEASES_PAGE)},
+                colors=ButtonDefaults.textButtonColors(color=Color.Transparent))
             updates.downloadError?.let { Text(it,fontSize=13.sp,color=MiuixTheme.colorScheme.onSurfaceVariantSummary) }
             if (release.apk == null) Text("此版本未提供可直接安装的 APK，请前往发布页下载。",fontSize=13.sp,
                 color=MiuixTheme.colorScheme.onSurfaceVariantSummary)

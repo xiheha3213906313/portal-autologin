@@ -7,6 +7,17 @@ import java.util.Arrays;
 final class ProjectLinks {
     static final String REPOSITORY="https://github.com/xiheha3213906313/portal-autologin";
     static final String LATEST_API="https://api.github.com/repos/xiheha3213906313/portal-autologin/releases/latest";
+    static final String RELEASES_PAGE=REPOSITORY+"/releases";
+    static String releasesApi(int page) {
+        if(page<1 || page>ReleaseHistory.MAX_PAGES)throw new IllegalArgumentException("invalid_page");
+        return LATEST_API.substring(0,LATEST_API.length()-"/latest".length())+
+            "?per_page="+ReleaseHistory.PAGE_SIZE+"&page="+page;
+    }
+    static boolean metadataUrl(String value) {
+        if(LATEST_API.equals(value))return true;
+        for(int page=1;page<=ReleaseHistory.MAX_PAGES;page++)if(releasesApi(page).equals(value))return true;
+        return false;
+    }
     static String issueDraft(String project,String username,String password) {
         project=project==null?"":project.trim();
         if(project.isEmpty() || project.length()>80 || project.contains("\n") || project.contains("\r"))
