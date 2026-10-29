@@ -291,30 +291,25 @@ class AppLoginController private constructor(private val context: Context) {
         val user = prefs.getString("username", "") ?: ""
         val pass = prefs.getString("password", "") ?: ""
         try { worker.execute {
-            try {
-                PortalHttpClient({ url -> job.network.openConnection(url) as HttpURLConnection }, {
-                    job.active && (job.force || !validated(job.network)) && connected(job.network)
-                }, { stage, detail ->
-                    DiagnosticLog.event("app.$stage", detail)
-                    if (stage == "submit.write_begin") {
-                        if (!job.active || (!job.force && validated(job.network))) throw IOException("attempt_cancelled")
-                        rememberSubmission(job)
-                    }
-                    if (stage == "submit.write_complete") job.credentialsWritten = true
-                }).login(user, pass)
-                main.post { submitted(job) }
-            } catch (_: PortalHttpClient.SubmissionUncertainException) {
-                main.post { submitted(job) }
-            } catch (e: Exception) {
-                DiagnosticLog.failure(e)
-                val rejected = e.message == "login_form_returned" || e.message == "authentication_rejected"
-                main.post {
-                    if (current !== job || !job.active) return@post
-                    if (rejected) {
-                        forgetRejectedSubmission(job)
-                        fail(job, "登录未通过，请检查账号和密码", true)
-                    } else if (job.submitted || (!job.force && validated(job.network))) submitted(job)
-                    else fail(job, "暂时无法登录，请检查 Wi-Fi 后重试")
+            val result = PortalLoginTask.run(PortalHttpClient({ url -> job.network.openConnection(url) as HttpURLConnection }, {
+                job.active && (job.force || !validated(job.network)) && connected(job.network)
+            }, { stage, detail ->
+                DiagnosticLog.event("app.$stage", detail)
+                if (stage == "submit.write_begin") {
+                    if (!job.active || (!job.force && validated(job.network))) throw IOException("attempt_cancelled")
+                    rememberSubmission(job)
+                }
+                if (stage == "submit.write_complete") job.credentialsWritten = true
+            }), user, pass)
+            result.failure?.let { DiagnosticLog.failure(it) }
+            main.post {
+                if (current !== job || !job.active) return@post
+                if (result.outcome == PortalLoginTask.Outcome.REJECTED) {
+                    forgetRejectedSubmission(job)
+                    fail(job, "登录未通过，请检查账号和密码", true)
+                } else {
+                    if (result.failure != null) DiagnosticLog.event("app.auth_failed_checking_internet", if (job.submitted) 1 else 0)
+                    confirmInternet(job)
                 }
             }
         } } catch (e: Exception) {
@@ -342,7 +337,7 @@ class AppLoginController private constructor(private val context: Context) {
             history.edit().remove("submitted_network").remove("submitted_at").apply()
         }
     }
-    private fun submitted(job: Job) {
+    private fun confirmInternet(job: Job) {
         if (current !== job || !job.active) return
         job.authenticationFinished = true
         state = UiState(Stage.CONNECTING, "正在确认联网状态")

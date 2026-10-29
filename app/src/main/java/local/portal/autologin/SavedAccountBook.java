@@ -37,10 +37,15 @@ final class SavedAccountBook {
     }
     void remember(String username,String password) {
         if(!valid(username,password))throw new IllegalArgumentException("invalid_account");
-        username=username.trim();String label="";boolean bundled=false;
-        for(Account a:accounts)if(a.username.equals(username)){label=a.label;bundled=a.bundled;break;}
-        final String key=username;accounts.removeIf(a->a.username.equals(key));
-        accounts.add(0,new Account(username,password,label,bundled));
+        username=username.trim();
+        for(int i=0;i<accounts.size();i++) {
+            Account existing=accounts.get(i);
+            if(existing.username.equals(username)) {
+                accounts.set(i,new Account(username,password,existing.label,existing.bundled));
+                return;
+            }
+        }
+        accounts.add(new Account(username,password,"",false));
     }
     boolean seed(List<Account> presets) {
         boolean changed=false;

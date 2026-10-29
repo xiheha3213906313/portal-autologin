@@ -21,13 +21,32 @@ public class SavedAccountBookTest {
         assertEquals("second",b.getAccounts().get(1).username);
         assertEquals("secret-2",b.getAccounts().get(1).password);
     }
-    @Test public void updatingSameAccountPreservesAliasAndMovesItToFront() {
+    @Test public void updatingSameAccountPreservesAliasAndOriginalPosition() {
         SavedAccountBook b=new SavedAccountBook();
         b.seed(Arrays.asList(preset("first","old","别名甲"),preset("second","other","别名乙")));
         b.remember("second","updated");
-        assertEquals(2,b.getAccounts().size());assertEquals("second",b.getAccounts().get(0).username);
-        assertEquals("updated",b.getAccounts().get(0).password);assertEquals("别名乙",b.getAccounts().get(0).displayName());
-        assertTrue(b.getAccounts().get(0).bundled);
+        assertEquals(2,b.getAccounts().size());assertEquals("first",b.getAccounts().get(0).username);
+        assertEquals("second",b.getAccounts().get(1).username);
+        assertEquals("updated",b.getAccounts().get(1).password);assertEquals("别名乙",b.getAccounts().get(1).displayName());
+        assertTrue(b.getAccounts().get(1).bundled);
+    }
+    @Test public void newAccountsAppendAndSelectingOrUpdatingDoesNotReorderAfterRestart() {
+        SavedAccountBook b=new SavedAccountBook();
+        b.remember("first","one");b.remember("second","two");
+        b.remember("first","updated");b.remember("third","three");b.remember("second","two");
+        b=SavedAccountBook.decode(b.encode());
+        assertEquals("first",b.getAccounts().get(0).username);assertEquals("updated",b.getAccounts().get(0).password);
+        assertEquals("second",b.getAccounts().get(1).username);assertEquals("third",b.getAccounts().get(2).username);
+        assertEquals(3,b.getAccounts().size());
+    }
+    @Test public void mixedCustomAndPresetPositionsStayFixedDuringRepeatedSavesAndSeeding() {
+        SavedAccountBook b=new SavedAccountBook();
+        List<SavedAccountBook.Account> defaults=Arrays.asList(preset("preset-a","one","甲"),preset("preset-b","two","乙"));
+        b.seed(defaults);b.remember("custom-a","three");b.remember("custom-b","four");
+        b.remember("custom-a","changed");b.seed(defaults);b=SavedAccountBook.decode(b.encode());
+        assertEquals("preset-a",b.getAccounts().get(0).username);assertEquals("preset-b",b.getAccounts().get(1).username);
+        assertEquals("custom-a",b.getAccounts().get(2).username);assertEquals("changed",b.getAccounts().get(2).password);
+        assertEquals("custom-b",b.getAccounts().get(3).username);
     }
     @Test public void addingPresetNeverOverwritesSavedPassword() {
         SavedAccountBook b=new SavedAccountBook();b.remember("first","user-changed");
