@@ -1,6 +1,0 @@
--keep class local.portal.autologin.PortalHook { *; }
--keep class local.portal.autologin.PortalHook$* { *; }
--keep class * extends io.github.libxposed.api.XposedModule { *; }
--dontwarn io.github.libxposed.api.**
--keep class local.portal.autologin.SilentPortal { *; }
--keep class local.portal.autologin.SilentPortal$* { *; }

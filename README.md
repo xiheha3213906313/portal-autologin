@@ -1,52 +1,23 @@
-# 门户自动登录
+# 安装包归档
 
-用于字节跳动访客 Wi-Fi 的 Android 自动认证工具，提供无需 Root 的普通模式和小米系 LSPosed 模式，采用 Miuix 界面。
+本分支统一保存门户自动登录各正式版本的 APK、ZIP 备用包与 SHA-256 校验文件。完整最新源码在 [main](https://github.com/xiheha3213906313/portal-autologin/tree/main)，更新说明与最新版下载见 [发布页](https://github.com/xiheha3213906313/portal-autologin/releases)。
 
-[下载安装包](https://github.com/xiheha3213906313/portal-autologin/releases/latest) · [公开源码](https://github.com/xiheha3213906313/portal-autologin/tree/feature/silent-login) · [更新记录](https://github.com/xiheha3213906313/portal-autologin/releases) · [反馈问题](https://github.com/xiheha3213906313/portal-autologin/issues)
+按版本保留 `release-assets/v版本号/` 目录；原安装包未重新编译或改签。迁移保留了原归档提交历史，既有发布页中的固定提交下载链接继续使用。
 
-## 普通模式
-
-Android 9 及以上，无需 Root。
-
-1. 连接目标访客 Wi-Fi，打开应用。
-2. 填写或选择账号密码，保存后自动尝试登录。
-3. 以后打开应用或从后台返回，会检查当前 Wi-Fi 并按需认证。
-
-“高级选项”默认折叠，展开后可使用：
-
-- **强制登录**：启动应用或保存配置时始终尝试认证，适合未认证却显示已联网的情况。
-- **后台自动登录**：使用已保存的账号监听 Wi-Fi 变化并按需认证，不持续轮询。Wi-Fi 名称留空匹配全部，填写时忽略大小写、空格和标点，按完整名称匹配。
-
-后台功能为实验性功能，可能受系统策略影响。Wi-Fi 输入框右侧的“授权”提供通知、自启动及定位设置；仅指定 Wi-Fi 名称时需要定位，不读取坐标。电源策略和无障碍辅助为可选项，不读取屏幕，不保证保活。
-
-开启后台功能后，返回退出会隐藏最近任务卡片；通知显示简短状态，关闭开关即可停止服务。Android 14 起允许划掉通知，通知消失不代表服务停止。
-
-## LSPosed 模式
-
-适用于小米、Redmi、POCO，需要 Root 和支持 Modern Xposed API 101 及以上的 LSPosed，兼容 API 102。
-
-在 LSPosed 启用模块，按需勾选作用域：
-
-| 作用域 | 用途 |
-| --- | --- |
-| 小米浏览器 `com.android.browser` | 门户页面快速填写并提交 |
-| 系统框架 `system` | 后台静默认证 |
-
-支持手动调整作用域；“Android 系统（android）”不是系统框架，无需勾选。仅使用门户填写时可只选浏览器。
-
-重启手机后打开应用，保存账号并开启“自动登录”；需要后台认证时再开启“静默登录”。静默登录保留手动打开门户后的填写兜底。非小米设备可使用普通模式，模块选项会灰显。
-
-## 其他功能
-
-- 两种模式共用账号配置，支持账号历史、只读预设和配置切换。
-- 启动时检查更新，支持应用内下载或浏览器下载；更新卡片汇总所有后续正式版内容，以纯文本和 `-` 列表显示。
-- 可开启诊断日志，复现问题后导出；关闭日志时隐藏导出和清空入口。
-- 自存账号保存在本地；“关于”中的分享入口会打开公开 GitHub Issue 草稿，由用户自行确认发布。
-
-## 安装与更新
-
-从发布页下载 APK 覆盖安装，保留原有配置。LSPosed 用户更新后请确认作用域、重启手机，再打开应用同步配置。
-
-同一版本可能替换修正版安装包；已安装相同版号时不会提示新版本，需从发布页重新下载并覆盖安装。
-
-作者：**xiheha**
+| 版本 | APK | ZIP 备用包 | 校验 |
+| --- | --- | --- | --- |
+| v1.4.1 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.4.1/portal-autologin-1.4.1.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.4.1/portal-autologin-1.4.1.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.4.1/SHA256SUMS.txt) |
+| v1.4.0 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.4.0/portal-autologin-1.4.0.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.4.0/portal-autologin-1.4.0.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.4.0/SHA256SUMS.txt) |
+| v1.3.5 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.5/portal-autologin-1.3.5.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.5/portal-autologin-1.3.5.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.5/SHA256SUMS.txt) |
+| v1.3.4 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.4/portal-autologin-1.3.4.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.4/portal-autologin-1.3.4.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.4/SHA256SUMS.txt) |
+| v1.3.3 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.3/portal-autologin-1.3.3.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.3/portal-autologin-1.3.3.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.3/SHA256SUMS.txt) |
+| v1.3.2 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.2/portal-autologin-1.3.2.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.2/portal-autologin-1.3.2.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.2/SHA256SUMS.txt) |
+| v1.3.1 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.1/portal-autologin-1.3.1.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.1/portal-autologin-1.3.1.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.1/SHA256SUMS.txt) |
+| v1.3.0 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.0/portal-autologin-1.3.0.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.0/portal-autologin-1.3.0.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.3.0/SHA256SUMS.txt) |
+| v1.2.4 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.4/portal-autologin-1.2.4.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.4/portal-autologin-1.2.4.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.4/SHA256SUMS.txt) |
+| v1.2.3 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.3/portal-autologin-1.2.3.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.3/portal-autologin-1.2.3.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.3/SHA256SUMS.txt) |
+| v1.2.2 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.2/portal-autologin-1.2.2.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.2/portal-autologin-1.2.2.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.2/SHA256SUMS.txt) |
+| v1.2.1 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.1/portal-autologin-1.2.1.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.1/portal-autologin-1.2.1.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2.1/SHA256SUMS.txt) |
+| v1.2 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2/portal-autologin-1.2.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2/portal-autologin-1.2.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.2/SHA256SUMS.txt) |
+| v1.1 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.1/portal-autologin-1.1.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.1/portal-autologin-1.1.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.1/SHA256SUMS.txt) |
+| v1.0 | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.0/portal-autologin-1.0.apk?raw=true) | [下载](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.0/portal-autologin-1.0.zip?raw=true) | [SHA-256](https://github.com/xiheha3213906313/portal-autologin/blob/Release/release-assets/v1.0/SHA256SUMS.txt) |
