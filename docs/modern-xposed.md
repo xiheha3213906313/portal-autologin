@@ -8,7 +8,7 @@
 
 模块声明位于 `META-INF/xposed/java_init.list`、`scope.list` 及 `module.prop`。`PortalHook` 继承 `XposedModule`，在 `onSystemServerStarting` 安装系统服务启动钩子，在 `onPackageReady` 为小米浏览器安装生命周期钩子。使用 `hook(...).intercept(...)`，未拦截的调用均通过 `chain.proceed()` 保留原始返回或异常。未启用热重载，更新模块后需重启手机。
 
-仍只推荐并限定 `com.android.browser` 与 `android` 作用域，继续保留小米、Redmi、POCO 品牌判断。原静默认证、门户启动拦截、前台填写兜底及前后台认证协调逻辑保持不变。
+推荐 `com.android.browser` 与 `system` 作用域，继续保留小米、Redmi、POCO 品牌判断。Modern API 中系统框架由虚拟包名 `system` 代表；`android` 对应系统对话框等其他进程，不是本模块静默认证所需的系统框架。`staticScope=false` 保留手动选择作用域：仅填写可选浏览器，使用静默认证时再选系统框架；不会锁住旧配置。原静默认证、门户启动拦截、前台填写兜底及前后台认证协调逻辑保持不变。
 
 ## 本地数据与远程同步
 
@@ -37,4 +37,5 @@
 - https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API
 - https://github.com/libxposed/api
 - https://github.com/libxposed/service
+- https://docs.lsposed.org/release/api_changes
 - https://t.me/LSPosed/324
