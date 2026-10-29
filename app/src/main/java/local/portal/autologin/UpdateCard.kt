@@ -27,10 +27,11 @@ import java.io.File
 internal fun UpdateCard(show: MutableState<Boolean>, updates: AppUpdates, currentVersion: String,
                         install: (File) -> Unit, openBrowser: (String) -> Unit) {
     val release = updates.release ?: return
+    val notes = remember(release.notes) { ReleaseNotesText.display(release.notes) }
     SuperDialog(show = show, title = if (updates.ready != null) "更新已就绪 ${release.version}" else "发现新版本 ${release.version}",
         summary = "当前版本 $currentVersion", onDismissRequest = { show.value = false }) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (release.notes.isNotBlank()) Text(release.notes, fontSize=14.sp,
+            if (notes.isNotBlank()) Text(notes, fontSize=14.sp,
                 modifier=Modifier.heightIn(max=180.dp).verticalScroll(rememberScrollState()))
             if (!release.notesComplete) TextButton(text="部分记录未加载，查看全部更新",
                 modifier=Modifier.fillMaxWidth(), onClick={openBrowser(ProjectLinks.RELEASES_PAGE)},
