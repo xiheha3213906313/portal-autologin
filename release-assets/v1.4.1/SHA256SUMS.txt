@@ -1,0 +1,2 @@
+fb95e3b09d6d7749b06d29b03fd1abd47360e4b920ad77f5e77e78f55152f39c  portal-autologin-1.4.1.apk
+073172a1dbbf5f30c506c9f667dc90ac529e7e468b19b4357e9c3f8acb84b5f4  portal-autologin-1.4.1.zip
