@@ -21,15 +21,21 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
-/** Ordinary application process only. No Xposed classes, root, service, or permanent observer. */
+/** Shared ordinary login engine for the foreground UI and the opt-in background service. */
 class AppLoginController private constructor(private val context: Context) {
     enum class Stage { CONFIGURATION, CONNECTING, SUCCESS, ERROR }
     data class UiState(val stage: Stage = Stage.CONFIGURATION, val message: String = "",
                        val successId: Long = 0, val detail: String = "",
                        val offerForceLogin: Boolean = false, val recommendForceLogin: Boolean = false,
                        val internetConfirmed: Boolean = false)
-    var state by mutableStateOf(UiState())
-        private set
+    private val uiState = mutableStateOf(UiState())
+    private val listeners = linkedSetOf<(UiState) -> Unit>()
+    var state: UiState
+        get() = uiState.value
+        private set(value) {
+            uiState.value = value
+            listeners.toList().forEach { listener -> runCatching { listener(value) }.onFailure { DiagnosticLog.failure(it) } }
+        }
     private val cm = context.getSystemService(ConnectivityManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
@@ -44,6 +50,9 @@ class AppLoginController private constructor(private val context: Context) {
     private lateinit var prefs: SharedPreferences
     private var moduleAvailable = false
     private var foreground = false
+    private var backgroundActive = false
+    var checkedNetwork: Network? = null
+        private set
     private var current: Job? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var successfulNetwork: Network? = null
@@ -51,7 +60,8 @@ class AppLoginController private constructor(private val context: Context) {
     private var animatedSuccess = -1L
 
     private class Job(val network: Network, val force: Boolean = false,
-                      val verificationOnly: Boolean = false) {
+                      val verificationOnly: Boolean = false, var background: Boolean = false,
+                      val ignoreValidation: Boolean = force || background) {
         @Volatile var active = true
         @Volatile var submitted = false
         @Volatile var credentialsWritten = false
@@ -64,11 +74,32 @@ class AppLoginController private constructor(private val context: Context) {
         var timeout: Runnable? = null
     }
 
-    fun enterForeground(preferences: SharedPreferences, hasModule: Boolean) {
-        prefs = preferences; moduleAvailable = hasModule; foreground = true
+    fun initialize(preferences: SharedPreferences, hasModule: Boolean) {
+        prefs = preferences; moduleAvailable = hasModule
         forceLoginEnabled = prefs.getBoolean("force_login", false)
         DiagnosticLog.setEnabled(prefs.getBoolean("debug_log", false))
+    }
+    fun enterForeground(preferences: SharedPreferences, hasModule: Boolean) {
+        initialize(preferences, hasModule)
+        foreground = true
         check(false)
+    }
+    fun addListener(listener: (UiState) -> Unit) { listeners += listener }
+    fun removeListener(listener: (UiState) -> Unit) { listeners -= listener }
+    fun attachBackground() { backgroundActive = true }
+    fun detachBackground() {
+        backgroundActive = false
+        current?.takeIf { it.background && !foreground }?.let { finish(it) }
+    }
+    fun canBackgroundCheck(network: Network): Boolean = backgroundActive && !moduleAvailable &&
+        configured() && connected(network) && (current?.let { !it.active || it.network == network } ?: true)
+    fun backgroundCheck(network: Network): Boolean {
+        if (!canBackgroundCheck(network)) return false
+        DiagnosticLog.event("app.background_check", if (forceLoginEnabled) 1 else 0)
+        // Every accepted background event needs fresh proof on this Wi-Fi. A prior success on the
+        // same Network object can outlive a portal session and must never short-circuit the check.
+        check(false, selectedNetwork = network, background = true)
+        return true
     }
     fun leaveForeground() { foreground = false }
     fun saved() {
@@ -95,6 +126,7 @@ class AppLoginController private constructor(private val context: Context) {
     fun clear() {
         current?.let { finish(it) }
         successfulNetwork = null
+        checkedNetwork = null
         state = UiState()
     }
 
@@ -121,12 +153,14 @@ class AppLoginController private constructor(private val context: Context) {
         it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     } == true
 
-    private fun check(retry: Boolean, oneShotForce: Boolean = false) {
+    private fun check(retry: Boolean, oneShotForce: Boolean = false, selectedNetwork: Network? = null,
+                      background: Boolean = false, ignoreSystemValidation: Boolean = false) {
         if (!configured()) { clear(); return }
-        val network = runCatching { wifi() }.getOrNull()
+        val network = runCatching { if (selectedNetwork != null) selectedNetwork.takeIf { connected(it) } else wifi() }.getOrNull()
         if (network == null) {
             current?.let { finish(it) }
             successfulNetwork = null
+            checkedNetwork = null
             state = UiState(Stage.ERROR, "请先连接 Wi-Fi")
             DiagnosticLog.event("app.no_wifi", 0)
             return
@@ -134,14 +168,25 @@ class AppLoginController private constructor(private val context: Context) {
         val force = ordinaryMode && (oneShotForce || forceLoginEnabled)
         current?.let {
             // A forced click may replace a passive check, but never a running authentication.
-            if (it.network == network && it.active && !(force && it.verificationOnly)) return
+            if (it.network == network && it.active && !(force && it.verificationOnly)) {
+                // Adopt a passive foreground check without restarting it. If it discovers a
+                // captive portal, the accepted background event must continue to authentication.
+                // Never change an in-flight credential submission into a different job.
+                if (background && it.verificationOnly && !it.background) {
+                    it.background = true
+                    DiagnosticLog.event("app.background_joined_verify", 0)
+                }
+                if (background) DiagnosticLog.event("app.background_merged", 0)
+                return
+            }
             finish(it)
         }
-        if (!force && validated(network)) {
-            val job = Job(network, verificationOnly = true)
+        checkedNetwork = network
+        if (!force && !ignoreSystemValidation && (background || validated(network))) {
+            val job = Job(network, verificationOnly = true, background = background)
             current = job
             showOnline(job, confirmed = false)
-            DiagnosticLog.event("app.system_validated", 1)
+            DiagnosticLog.event(if (background) "app.background_verify_first" else "app.system_validated", 1)
             if (!startObservation(job, 20000)) return
             verifyInternet(job)
             return
@@ -151,14 +196,15 @@ class AppLoginController private constructor(private val context: Context) {
         val sameBoot = history.getInt("submitted_boot", -2) == bootCount()
         val decision = attempts.begin(handle, SystemClock.elapsedRealtime(),
             history.getLong("submitted_network", -1),
-            if (sameBoot) history.getLong("submitted_at", -1) else -1, retry, force)
+            if (sameBoot) history.getLong("submitted_at", -1) else -1, retry, force && !background)
         DiagnosticLog.event("app.attempt_decision", decision.ordinal)
         if (decision == LoginAttempts.Decision.RECENT_FAILURE) {
             state = UiState(Stage.ERROR, "暂时无法登录，请检查 Wi-Fi 后重试", offerForceLogin = ordinaryMode)
             return
         }
         if (decision == LoginAttempts.Decision.RUNNING) return
-        val job = Job(network, force)
+        val job = Job(network, force, background = background,
+            ignoreValidation = force || background || ignoreSystemValidation)
         current = job
         state = UiState(Stage.CONNECTING, if (force) "正在强制登录" else "正在连接")
         DiagnosticLog.event("app.attempt_started", if (force) 1 else 0)
@@ -221,7 +267,7 @@ class AppLoginController private constructor(private val context: Context) {
                 job.checkingInternet = false
                 DiagnosticLog.event("app.internet.result", result.ordinal)
                 // Never apply a completed check to a different Wi-Fi after a network switch.
-                if (!connected(job.network) || wifi() != job.network) {
+                if (!connected(job.network) || (!job.background && wifi() != job.network)) {
                     fail(job, "Wi-Fi 已切换，请重试")
                 } else if (job.submitted && result != InternetCheck.Result.ONLINE &&
                     result != InternetCheck.Result.CANCELLED && job.internetChecks < 3) {
@@ -245,6 +291,14 @@ class AppLoginController private constructor(private val context: Context) {
 
     private fun verificationFailed(job: Job, detail: String) {
         if (current !== job) return
+        if (job.verificationOnly && job.background && backgroundActive &&
+            prefs.getBoolean("background_login", false) && connected(job.network)) {
+            DiagnosticLog.event("app.background_validation_mismatch", 0)
+            finish(job)
+            // Override only the cached system flag. The existing submission cooldown still applies.
+            check(false, selectedNetwork = job.network, background = true, ignoreSystemValidation = true)
+            return
+        }
         val submitted = job.submitted
         finish(job)
         successfulNetwork = null
@@ -292,11 +346,11 @@ class AppLoginController private constructor(private val context: Context) {
         val pass = prefs.getString("password", "") ?: ""
         try { worker.execute {
             val result = PortalLoginTask.run(PortalHttpClient({ url -> job.network.openConnection(url) as HttpURLConnection }, {
-                job.active && (job.force || !validated(job.network)) && connected(job.network)
+                job.active && (job.ignoreValidation || !validated(job.network)) && connected(job.network)
             }, { stage, detail ->
                 DiagnosticLog.event("app.$stage", detail)
                 if (stage == "submit.write_begin") {
-                    if (!job.active || (!job.force && validated(job.network))) throw IOException("attempt_cancelled")
+                    if (!job.active || (!job.ignoreValidation && validated(job.network))) throw IOException("attempt_cancelled")
                     rememberSubmission(job)
                 }
                 if (stage == "submit.write_complete") job.credentialsWritten = true

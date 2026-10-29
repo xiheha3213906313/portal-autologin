@@ -1,9 +1,12 @@
 package local.portal.autologin
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.SharedPreferences
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
 import android.net.Uri
@@ -16,6 +19,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,11 +28,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +54,8 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.extra.SuperDialog
 import top.yukonga.miuix.kmp.extra.SuperSwitch
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.icons.basic.ArrowRight
 import top.yukonga.miuix.kmp.theme.*
 import java.io.File
 import kotlinx.coroutines.delay
@@ -54,8 +69,22 @@ class SettingsActivity : ComponentActivity() {
     private var showSettings by mutableStateOf(false)
     private var pendingSavedCheck by mutableStateOf(false)
     private var foreground by mutableStateOf(false)
+    private var backgroundExit by mutableStateOf(false)
     private var pendingLog: String? = null
     private var pendingInstallation: File? = null
+    private var askedForWifiPermission = false
+    private var askedForNotifications = false
+    private var authorizationRevision by mutableIntStateOf(0)
+    private var showBackgroundSetup by mutableStateOf(false)
+    private val backgroundSettings = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        refreshBackgroundAuthorization()
+    }
+    private val wifiNamePermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        refreshBackgroundAuthorization()
+    }
+    private val backgroundNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        refreshBackgroundAuthorization()
+    }
     private val installPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val file = pendingInstallation
         pendingInstallation = null
@@ -80,13 +109,11 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
-        @Suppress("DEPRECATION")
-        val preferenceMode = try {
-            getSharedPreferences("portal", Context.MODE_WORLD_READABLE)
-            moduleAvailable = true
-            Context.MODE_WORLD_READABLE
-        } catch (_: SecurityException) { Context.MODE_PRIVATE }
-        prefs = UnifiedPreferences.open(this,"portal",preferenceMode)
+        val configuration = PortalPreferences.open(this)
+        moduleAvailable = configuration.moduleAvailable
+        prefs = configuration.prefs
+        showBackgroundSetup = savedInstanceState?.getBoolean("background_setup") == true &&
+            !prefs.getBoolean("background_setup_completed", false)
         accountStore = AccountStore(this, prefs)
         login = AppLoginController.get(this)
         setContent {
@@ -110,6 +137,7 @@ class SettingsActivity : ComponentActivity() {
                         showSettings = false
                     }
                 }
+                BackHandler(enabled = backgroundExit) { hideTaskInBackground() }
                 val accountPage = showSettings || state.stage == AppLoginController.Stage.CONFIGURATION
                 SideEffect {
                     if (accountPage) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -130,6 +158,14 @@ class SettingsActivity : ComponentActivity() {
                 }
                 UpdateCard(show = showUpdate, updates = updates, currentVersion = version,
                     install = ::installUpdate, openBrowser = ::openBrowser)
+                if (showBackgroundSetup) BackgroundSetupPrompt(
+                    notificationsAllowed = remember(authorizationRevision) {
+                        BackgroundAuthorization.notificationsVisible(this@SettingsActivity)
+                    },
+                    onDismiss = { showBackgroundSetup = false },
+                    onNotifications = ::requestNotificationPermission,
+                    onAutoStart = ::openAutoStartSettings,
+                    onComplete = ::completeBackgroundSetup)
             }
         }
     }
@@ -139,10 +175,17 @@ class SettingsActivity : ComponentActivity() {
         AppUpdates.get(this).checkOnStart(DiagnosticLog.VERSION)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("background_setup", showBackgroundSetup)
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onResume() {
         super.onResume()
         foreground = true
+        setTaskHidden(false)
         login.enterForeground(prefs, moduleAvailable && xiaomiSystem)
+        refreshBackgroundAuthorization()
     }
     override fun onPause() {
         foreground = false
@@ -158,6 +201,12 @@ class SettingsActivity : ComponentActivity() {
         var enabled by remember { mutableStateOf(prefs.getBoolean("enabled", false)) }
         var silent by remember { mutableStateOf(prefs.getBoolean("silent", false)) }
         var forceLogin by remember { mutableStateOf(prefs.getBoolean("force_login", false)) }
+        var backgroundLogin by remember { mutableStateOf(prefs.getBoolean("background_login", false)) }
+        var advancedExpanded by rememberSaveable { mutableStateOf(false) }
+        var wifiFilter by remember { mutableStateOf(prefs.getString("background_wifi", "").orEmpty()) }
+        var wifiFocused by remember { mutableStateOf(false) }
+        var wifiHadIme by remember { mutableStateOf(false) }
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
         var debugLog by remember { mutableStateOf(prefs.getBoolean("debug_log", false)) }
         var showPassword by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(if (accountStore.initializationFailed ||
@@ -172,9 +221,12 @@ class SettingsActivity : ComponentActivity() {
         var savedEnabled by remember { mutableStateOf(enabled) }
         var savedSilent by remember { mutableStateOf(silent) }
         var savedForceLogin by remember { mutableStateOf(forceLogin) }
+        var savedBackgroundLogin by remember { mutableStateOf(backgroundLogin) }
+        var savedWifiFilter by remember { mutableStateOf(wifiFilter) }
         val accountPicker = remember { mutableStateOf(false) }
         val confirmClear = remember { mutableStateOf(false) }
         val about = remember { mutableStateOf(false) }
+        val authorization = remember { mutableStateOf(false) }
         var sharing by remember { mutableStateOf(false) }
         val focus = LocalFocusManager.current
         val hasUpdate = updates.hasUpdate(version)
@@ -182,25 +234,57 @@ class SettingsActivity : ComponentActivity() {
         val valid = username.isNotBlank() && password.isNotEmpty()
         val credentialsChanged = username.trim() != savedUsername || password != savedPassword
         val ordinaryMode = !moduleAvailable || !xiaomiSystem
-        val optionsChanged = enabled != savedEnabled || silent != savedSilent || forceLogin != savedForceLogin
+        val backgroundChanged = backgroundLogin != savedBackgroundLogin || wifiFilter != savedWifiFilter
+        val optionsChanged = enabled != savedEnabled || silent != savedSilent || forceLogin != savedForceLogin || backgroundChanged
         val changed = credentialsChanged || optionsChanged
         val switchingSavedAccount = credentialsChanged && !optionsChanged && savedAccounts.any {
             it.username == username.trim() && it.password == password
         }
+        val applyBackgroundOptions = { active: Boolean, name: String ->
+            if (active && !WifiNameMatcher.validFilter(name)) {
+                error = "请输入有效的 Wi-Fi 名称，或留空匹配全部"
+                false
+            } else if (!prefs.edit().putBoolean("background_login", active).putString("background_wifi", name).commit()) {
+                error = "后台设置保存失败，请重试"
+                false
+            } else {
+                backgroundLogin = active; savedBackgroundLogin = active
+                wifiFilter = name; savedWifiFilter = name
+                error = null
+                DiagnosticLog.event("background.settings_saved", if (active) 1 else 0)
+                refreshBackgroundAuthorization()
+                true
+            }
+        }
+        val onBackgroundToggle = { active: Boolean ->
+            focus.clearFocus()
+            if (applyBackgroundOptions(active, wifiFilter) && active &&
+                !prefs.getBoolean("background_setup_completed", false)) {
+                showBackgroundSetup = true
+            }
+        }
+        val backgroundStatus = remember(authorizationRevision, savedUsername, savedPassword,
+            backgroundLogin, savedWifiFilter, BackgroundLoginService.running) {
+            BackgroundLoginService.statusLabel(this@SettingsActivity)
+        }
         val save = {
             if (username.isBlank() || password.isEmpty()) {
                 error = "请输入账号和密码"
+            } else if (backgroundLogin && !WifiNameMatcher.validFilter(wifiFilter)) {
+                error = "请输入有效的 Wi-Fi 名称，或留空匹配全部"
             } else if (!accountStore.remember(username.trim(), password)) {
                 error = "账号保存失败，请重试"
             } else {
                 savedAccounts = accountStore.accounts
                 val ok = prefs.edit().putString("username", username.trim())
                     .putString("password", password).putBoolean("enabled", enabled)
-                    .putBoolean("silent", silent).putBoolean("force_login", forceLogin).commit()
+                    .putBoolean("silent", silent).putBoolean("force_login", forceLogin)
+                    .putBoolean("background_login", backgroundLogin).putString("background_wifi", wifiFilter).commit()
                 if (ok) {
                     savedUsername = username.trim(); savedPassword = password
                     savedEnabled = enabled; savedSilent = silent
                     savedForceLogin = forceLogin
+                    savedBackgroundLogin = backgroundLogin; savedWifiFilter = wifiFilter
                     notifyConfigChanged()
                     error = null
                     focus.clearFocus()
@@ -214,13 +298,25 @@ class SettingsActivity : ComponentActivity() {
                         pendingSavedCheck = false
                     }
                     login.saved()
+                    BackgroundLoginService.sync(this@SettingsActivity)
+                    if (ordinaryMode && backgroundLogin &&
+                        !BackgroundAuthorization.requiredGranted(this@SettingsActivity, wifiFilter.isNotBlank())) {
+                        showSettings = true
+                        if (!prefs.getBoolean("background_setup_completed", false) &&
+                            !BackgroundAuthorization.notificationsVisible(this@SettingsActivity)) showBackgroundSetup = true
+                    }
                 } else error = "保存失败，请重试"
             }
+        }
+        LaunchedEffect(imeVisible, wifiFocused) {
+            if (!wifiFocused) wifiHadIme = false
+            else if (imeVisible) wifiHadIme = true
+            else if (wifiHadIme) focus.clearFocus()
         }
         LaunchedEffect(savedFeedback) {
             if (savedFeedback) { delay(1800); savedFeedback=false }
         }
-        LaunchedEffect(username,password,enabled,silent,forceLogin) {
+        LaunchedEffect(username,password,enabled,silent,forceLogin,backgroundLogin,wifiFilter) {
             savedFeedback=false
             // A late background result must not discard a configuration being edited.
             pendingSavedCheck=false
@@ -288,9 +384,74 @@ class SettingsActivity : ComponentActivity() {
                         onCheckedChange = { silent = it })
                 }
                 if (ordinaryMode) Card(modifier = Modifier.fillMaxWidth()) {
-                    SuperSwitch(title = "强制登录", checked = forceLogin,
-                        summary = if (forceLogin) "启动软件或保存配置时始终进行认证" else null,
-                        onCheckedChange = { forceLogin = it })
+                    val arrowRotation by animateFloatAsState(if (advancedExpanded) 90f else 0f,
+                        label = "advancedOptionsArrow")
+                    Row(Modifier.fillMaxWidth()
+                        .semantics { stateDescription = if (advancedExpanded) "已展开" else "已折叠" }
+                        .clickable(role = Role.Button) {
+                            focus.clearFocus()
+                            advancedExpanded = !advancedExpanded
+                        }
+                        .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("高级选项", fontSize = 17.sp, modifier = Modifier.weight(1f))
+                        Icon(MiuixIcons.Basic.ArrowRight, contentDescription = null,
+                            modifier = Modifier.size(20.dp).rotate(arrowRotation),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    }
+                    AnimatedVisibility(visible = advancedExpanded) {
+                        Column {
+                            SuperSwitch(title = "强制登录", checked = forceLogin,
+                                summary = if (forceLogin) "启动软件或保存配置时始终进行认证" else null,
+                                onCheckedChange = { forceLogin = it })
+                            Row(Modifier.fillMaxWidth().toggleable(value = backgroundLogin, role = Role.Switch,
+                                onValueChange = onBackgroundToggle)
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("后台自动登录", fontSize = 17.sp)
+                                        if (backgroundLogin) Text("($backgroundStatus)",
+                                            fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                                    }
+                                    if (backgroundLogin) Text("实验性功能，可能不生效", fontSize = 14.sp,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                                }
+                                Switch(checked = backgroundLogin,
+                                    onCheckedChange = onBackgroundToggle,
+                                    modifier = Modifier.clearAndSetSemantics { })
+                            }
+                            if (backgroundLogin) Column(Modifier.padding(horizontal = 14.dp).padding(bottom = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(Modifier.fillMaxWidth()) {
+                                    TextField(value = wifiFilter, onValueChange = { wifiFilter = it; error = null },
+                                        label = "", singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                            .semantics { contentDescription = "Wi-Fi名称(留空匹配全部)" }
+                                            .onFocusChanged { state ->
+                                                val lostFocus = wifiFocused && !state.isFocused
+                                                wifiFocused = state.isFocused
+                                                if (lostFocus && wifiFilter != savedWifiFilter)
+                                                    applyBackgroundOptions(backgroundLogin, wifiFilter)
+                                            },
+                                        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                                        trailingIcon = {
+                                            TextButton(text = "授权", onClick = {
+                                                focus.clearFocus()
+                                                if (applyBackgroundOptions(backgroundLogin, wifiFilter)) authorization.value = true
+                                            }, colors = ButtonDefaults.textButtonColors(color = Color.Transparent),
+                                                minHeight = 48.dp, insideMargin = PaddingValues(horizontal = 12.dp))
+                                        })
+                                    if (wifiFilter.isEmpty()) Text("Wi-Fi名称(留空匹配全部)", fontSize = 14.sp,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                        modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp, end = 76.dp)
+                                            .clearAndSetSemantics { })
+                                }
+                            }
+                        }
+                    }
                 }
                 Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(14.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -322,6 +483,7 @@ class SettingsActivity : ComponentActivity() {
                                         val canDelete = !active || prefs.edit().remove("username").remove("password").commit()
                                         if (active && canDelete) {
                                             notifyConfigChanged(); login.clear()
+                                            BackgroundLoginService.sync(this@SettingsActivity)
                                         }
                                         if (canDelete && accountStore.remove(account.username)) {
                                             savedAccounts = accountStore.accounts
@@ -367,10 +529,11 @@ class SettingsActivity : ComponentActivity() {
                             if (prefs.edit().putBoolean("debug_log", value).commit()) {
                                 debugLog = value
                                 DiagnosticLog.setEnabled(value)
+                                if (value) BackgroundLoginService.recordState(this@SettingsActivity)
                                 sendBroadcast(Intent(SilentPortal.LOG_CONFIG).setPackage("android"))
                             } else error = "日志设置保存失败"
                         })
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    if (debugLog) Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(text = "导出日志", onClick = { requestLogExport() },
                             modifier = Modifier.weight(1f), minHeight = 48.dp,
@@ -385,6 +548,11 @@ class SettingsActivity : ComponentActivity() {
                     minHeight = 48.dp, colors = ButtonDefaults.textButtonColors(color = Color.Transparent))
             }
         }
+        BackgroundAuthorizationCard(show = authorization, context = this, revision = authorizationRevision,
+            needsWifiName = wifiFilter.isNotBlank(), requestNotifications = ::requestNotificationPermission,
+            requestLocation = ::requestWifiNamePermission, requestAutoStart = ::openAutoStartSettings,
+            openSettings = ::openBackgroundSettings)
+
         SuperDialog(show = confirmClear, title = "清除账号？", summary = "清除自存账号与登录配置，保留内置预设",
             onDismissRequest = { confirmClear.value = false }) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -394,11 +562,14 @@ class SettingsActivity : ComponentActivity() {
                         if (prefs.edit().clear().commit()) {
                             username = ""; password = ""; enabled = false; silent = false; debugLog = false
                             forceLogin = false; savedForceLogin = false
+                            backgroundLogin = false; savedBackgroundLogin = false; backgroundExit = false
+                            wifiFilter = ""; savedWifiFilter = ""
                             selectedPreset = null; savedUsername = ""; savedPassword = ""
                             savedEnabled = false; savedSilent = false
                             notifyConfigChanged()
                             DiagnosticLog.setEnabled(false)
                             login.clear()
+                            BackgroundLoginService.sync(this@SettingsActivity)
                             showSettings = false
                             showPassword = false; error = null
                             val historyCleared = accountStore.clear()
@@ -455,6 +626,67 @@ class SettingsActivity : ComponentActivity() {
             .onFailure { Toast.makeText(this, "未找到可用的浏览器", Toast.LENGTH_SHORT).show() }
     }
 
+    private fun refreshBackgroundAuthorization() {
+        val configuration = PortalPreferences.open(this)
+        backgroundExit = !configuration.moduleActive && configuration.prefs.getBoolean("background_login", false)
+        authorizationRevision++
+        BackgroundLoginService.sync(this)
+    }
+
+    private fun setTaskHidden(hidden: Boolean): Boolean = runCatching {
+        val task = getSystemService(ActivityManager::class.java).appTasks.firstOrNull {
+            @Suppress("DEPRECATION")
+            val id = if (Build.VERSION.SDK_INT >= 29) it.taskInfo.taskId else it.taskInfo.id
+            id == taskId
+        } ?: return@runCatching false
+        task.setExcludeFromRecents(hidden)
+        true
+    }.onFailure { DiagnosticLog.failure(it) }.getOrDefault(false)
+
+    private fun hideTaskInBackground() {
+        BackgroundLoginService.sync(this)
+        DiagnosticLog.event("background.hide_task", if (BackgroundLoginService.running) 1 else 0)
+        if (!setTaskHidden(true) || !moveTaskToBack(true)) finishAndRemoveTask()
+    }
+
+    private fun openBackgroundSettings(candidates: List<Intent>) {
+        for (intent in candidates) {
+            if (runCatching { backgroundSettings.launch(intent) }.isSuccess) return
+        }
+        Toast.makeText(this, "请在系统设置中手动管理此应用", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openAutoStartSettings() {
+        openBackgroundSettings(BackgroundAuthorization.autoStartSettings(this))
+    }
+
+    private fun completeBackgroundSetup() {
+        // This is the user's acknowledgement, not an automatic reading of the OEM setting.
+        if (prefs.edit().putBoolean("background_setup_completed", true).commit()) {
+            showBackgroundSetup = false
+            refreshBackgroundAuthorization()
+        } else Toast.makeText(this, "授权配置保存失败，请重试", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 && !BackgroundAuthorization.notificationPermission(this) &&
+            (!askedForNotifications || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+            askedForNotifications = true
+            backgroundNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else openBackgroundSettings(BackgroundAuthorization.notificationSettings(this))
+    }
+
+    private fun requestWifiNamePermission() {
+        if (!BackgroundAuthorization.fineLocation(this)) {
+            if (askedForWifiPermission && !shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                openBackgroundSettings(listOf(BackgroundAuthorization.appDetails(this)))
+            } else {
+                askedForWifiPermission = true
+                wifiNamePermission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
+            }
+        }
+    }
+
     private fun installUpdate(file: File) {
         if (!packageManager.canRequestPackageInstalls()) {
             pendingInstallation = file
@@ -477,6 +709,7 @@ class SettingsActivity : ComponentActivity() {
         sendBroadcast(Intent(SilentPortal.ACTION).setPackage("android"))
     }
     private fun requestLogExport() {
+        BackgroundLoginService.recordState(this)
         sendOrderedBroadcast(Intent(SilentPortal.LOG_EXPORT).setPackage("android"), null,
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
