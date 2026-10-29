@@ -6,7 +6,7 @@ import android.os.*;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.*;
-import de.robv.android.xposed.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Event-driven observer in system_server. No main-thread HTTP or permanent polling. */
 public final class SilentPortal {
@@ -17,12 +17,15 @@ public final class SilentPortal {
     public static final String LOG_CLEAR="local.portal.autologin.LOG_CLEAR";
     private static final String APP_BEGIN="local.portal.autologin.APP_LOGIN_BEGIN";
     private static final String APP_END="local.portal.autologin.APP_LOGIN_END";
-    private static final String MODULE="local.portal.autologin";
     private static SilentPortal instance;
     private final ConnectivityManager cm;
     private final Handler handler;
     private int launchHookCount=-1;
     private long applicationLeaseUntil;
+    // Hold the listener strongly: framework preference listeners may use weak references.
+    private final SharedPreferences.OnSharedPreferenceChangeListener configListener;
+    private final AtomicBoolean configChanged=new AtomicBoolean();
+    private final Runnable configUpdate;
     private final LinkedHashMap<Network,Attempt> attempts=new LinkedHashMap<>();
     private final ExecutorService worker=new ThreadPoolExecutor(0,1,30,TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(2),r->{Thread t=new Thread(r,"PortalAuth");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -36,7 +39,7 @@ public final class SilentPortal {
     private static Config config() {
         Config c=new Config();
         try {
-            XSharedPreferences p=new XSharedPreferences(MODULE,"portal");p.reload();
+            SharedPreferences p=ModuleRuntime.preferences();
             DiagnosticLog.setEnabled(p.getBoolean("debug_log",false));
             c.user=p.getString("username","");c.pass=p.getString("password","");
             c.enabled=p.getBoolean("enabled",false) && p.getBoolean("silent",false) &&
@@ -44,10 +47,19 @@ public final class SilentPortal {
         } catch (Throwable ignored) { c.enabled=false; }
         return c;
     }
-    private static void log(String s) { XposedBridge.log("PortalAuto: silent "+s);DiagnosticLog.event(s,0); }
+    private static void log(String s) { ModuleRuntime.log("silent "+s);DiagnosticLog.event(s,0); }
     private SilentPortal(Context context) {
         cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
         HandlerThread thread=new HandlerThread("PortalNetworkObserver");thread.start();handler=new Handler(thread.getLooper());
+        configUpdate=()->{
+            config();
+            if(configChanged.getAndSet(false)) configurationChanged();
+        };
+        configListener=(prefs,key)->{
+            if(key==null || !"debug_log".equals(key)) configChanged.set(true);
+            handler.removeCallbacks(configUpdate);
+            handler.postDelayed(configUpdate,100);
+        };
     }
     public static synchronized void start(Context context) {
         if (!DeviceCompatibility.supportsModule(Build.BRAND,Build.MANUFACTURER)) return;
@@ -139,7 +151,20 @@ public final class SilentPortal {
             }
         },handler);
         hookPortalLaunch();
+        ModuleRuntime.preferences().registerOnSharedPreferenceChangeListener(configListener);
         handler.post(this::scan);
+    }
+    private void configurationChanged() {
+        DiagnosticLog.event("config.remote_updated",0);
+        synchronized(attempts) {
+            Iterator<Attempt> it=attempts.values().iterator();
+            while(it.hasNext()) {
+                Attempt a=it.next();
+                if(a.active && a.posted) continue;
+                a.active=false;it.remove();
+            }
+        }
+        scan();
     }
     @android.annotation.SuppressLint("MissingPermission")
     private void scan() { try { DiagnosticLog.event("network.scan",0);for(Network n:cm.getAllNetworks()) request(n); } catch(Throwable e) {DiagnosticLog.failure(e);} }
@@ -227,19 +252,20 @@ public final class SilentPortal {
     }
     private void hookPortalLaunch() {
         try {
-            Object service=XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.os.ServiceManager",null),"getService","connectivity");
+            Class<?> manager=Class.forName("android.os.ServiceManager");
+            Method getService=manager.getDeclaredMethod("getService",String.class);getService.setAccessible(true);
+            Object service=getService.invoke(null,"connectivity");
             if(service==null || service.getClass().getName().equals("android.os.BinderProxy")) {log("launch_hook_unavailable");return;}
             int count=0;
             for(Method m:service.getClass().getDeclaredMethods()) {
                 if(!Arrays.asList("startCaptivePortalApp","startCaptivePortalAppInternal").contains(m.getName()) || m.getReturnType()!=void.class) continue;
                 if(!Arrays.asList(m.getParameterTypes()).contains(Network.class)) continue;
-                XposedBridge.hookMethod(m,new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam p) {
-                        try {for(Object arg:p.args) if(arg instanceof Network && request((Network)arg)) {
-                            DiagnosticLog.event("portal.launch_suppressed",0);p.setResult(null);return;
-                        }}
-                        catch(Throwable ignored) { /* Keep the system's normal login path. */ }
-                    }
+                ModuleRuntime.framework().hook(m).intercept(chain -> {
+                    try {for(Object arg:chain.getArgs()) if(arg instanceof Network && request((Network)arg)) {
+                        DiagnosticLog.event("portal.launch_suppressed",0);return null;
+                    }}
+                    catch(Throwable ignored) { /* Keep the system's normal login path. */ }
+                    return chain.proceed();
                 });count++;
             }
             launchHookCount=count;log("launch_hooks_"+count);

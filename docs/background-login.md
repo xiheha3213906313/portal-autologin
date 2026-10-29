@@ -27,7 +27,7 @@ Wi-Fi 名称为空时接受全部 Wi-Fi 连接。非空时，对完整名称进�
 - 无障碍辅助仅在系统连接服务时，尝试恢复已保存并开启的后台自动登录；不读取窗口、不接收界面事件、不模拟操作，也不定时唤醒。不会替代前台服务，不保证保活；缺少后台定位使用条件时仍需重新打开应用恢复指定名称监听。
 - 从授权设置返回或重复启动相同后台配置，不重置当前连接的检查记录；授权恢复只刷新通知，不重复提交认证。
 - 小米系启用 LSPosed 模块时使用现有模块路径，不同时运行普通模式的后台服务。
-- 模块可用性只在进程首次打开配置前探测一次，界面和服务共用该结果。避免 Android 缓存了私有配置对象后，后续公开模式调用不再抛异常，导致普通模式被误判为模块模式。
+- 1.4.1 起模块可用性由真实框架服务连接及断开事件提供，界面和服务共用该状态，不再探测世界可读偏好；框架服务稍晚连接时重新检查模式。配置保留与同步见 [Modern Xposed 迁移](modern-xposed.md)。
 
 Android 依据：[WifiInfo](https://developer.android.com/reference/android/net/wifi/WifiInfo)、[前台服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types)、[前台服务启动限制](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)。
 

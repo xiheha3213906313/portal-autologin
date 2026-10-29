@@ -72,7 +72,36 @@ class UnifiedPreferencesTest {
         assertFalse(temp.root.listFiles()!!.any { it.name.endsWith(".tmp") })
     }
 
-    private class MemoryPreferences(private val values: MutableMap<String,Any> = mutableMapOf()) : SharedPreferences {
+    @Test fun remoteNotificationSeesOnlyDurablyCommittedLocalSnapshot() {
+        val notifications = mutableListOf<Map<String, *>>()
+        val backing = MemoryPreferences()
+        val local = file()
+        val prefs = UnifiedPreferences(backing, local) { values ->
+            assertEquals(PreferenceSnapshot.read(local), values)
+            notifications += values.toMap()
+        }
+        assertTrue(prefs.edit().putString("username", "guest").putString("password", "secret").commit())
+        assertEquals(1, notifications.size)
+        assertEquals("secret", notifications.single()["password"])
+        backing.failCommit = true
+        assertFalse(prefs.edit().putString("username", "unsaved").commit())
+        assertEquals(1, notifications.size)
+        backing.failCommit = false
+        assertTrue(prefs.edit().clear().commit())
+        assertTrue(notifications.last().isEmpty())
+    }
+
+    @Test fun failedSnapshotWriteDoesNotPublishAnUndurableConfiguration() {
+        var notified = false
+        val local = file()
+        val prefs = UnifiedPreferences(MemoryPreferences(), local) { notified = true }
+        assertTrue(local.delete())
+        assertTrue(local.mkdir())
+        assertFalse(prefs.edit().putString("username", "unsaved").commit())
+        assertFalse(notified)
+    }
+
+    internal class MemoryPreferences(private val values: MutableMap<String,Any> = mutableMapOf()) : SharedPreferences {
         var failCommit=false
         override fun getAll(): MutableMap<String,*> = values.toMutableMap()
         override fun getString(key: String?, defValue: String?) = values[key] as? String ?: defValue

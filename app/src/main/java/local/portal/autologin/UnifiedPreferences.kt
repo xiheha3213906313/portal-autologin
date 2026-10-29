@@ -5,9 +5,10 @@ import android.content.SharedPreferences
 import java.io.File
 import java.io.IOException
 
-/** Native preferences remain the module-readable mirror; filesDir is the stable source on reopen. */
+/** App-private preferences with a stable snapshot shared by ordinary and module settings. */
 internal class UnifiedPreferences internal constructor(
-    private val backing: SharedPreferences, private val file: File
+    private val backing: SharedPreferences, private val file: File,
+    private val onCommitted: (Map<String, *>) -> Unit = {}
 ) : SharedPreferences by backing {
     var initializationFailed = false
         private set
@@ -43,7 +44,11 @@ internal class UnifiedPreferences internal constructor(
             override fun clear() = apply { editor.clear() }
             override fun commit(): Boolean = synchronized(this@UnifiedPreferences) {
                 if (!editor.commit()) return@synchronized false
-                try { PreferenceSnapshot.write(file,backing.all); true }
+                try {
+                    PreferenceSnapshot.write(file,backing.all)
+                    onCommitted(backing.all)
+                    true
+                }
                 catch (_: IOException) { false }
             }
             // The app only applies small rejection-record removals; durability matters across mode changes.
@@ -59,7 +64,9 @@ internal class UnifiedPreferences internal constructor(
             val file = File(app.filesDir,"unified-preferences/$name.properties")
             return stores.getOrPut(file.absolutePath) {
                 val backing = app.getSharedPreferences(name,mode)
-                UnifiedPreferences(backing,file)
+                UnifiedPreferences(backing,file) { values ->
+                    if (name == "portal") ModuleBridge.localCommitted(values)
+                }
             }
         }
     }

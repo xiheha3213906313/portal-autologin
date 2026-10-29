@@ -7,14 +7,14 @@ def hasLocalSigning = rootProject.file('signing/module.p12').isFile() &&
     rootProject.file('signing/password').isFile()
 android {
     namespace 'local.portal.autologin'
-    compileSdk 35
+    compileSdk 36
     buildToolsVersion '35.0.0'
     defaultConfig {
         applicationId 'local.portal.autologin'
         minSdk 28
         targetSdk 35
-        versionCode 23
-        versionName '1.4.0'
+        versionCode 24
+        versionName '1.4.1'
     }
     signingConfigs {
         if (hasLocalSigning) {
@@ -60,7 +60,8 @@ def generatePortalScript = tasks.register('generatePortalScript') {
 }
 tasks.named('preBuild').configure { dependsOn generatePortalScript }
 dependencies {
-    compileOnly files('../toolchain/xposed.jar')
+    compileOnly 'io.github.libxposed:api:101.0.1'
+    implementation 'io.github.libxposed:service:101.0.0'
     implementation 'top.yukonga.miuix.kmp:miuix-android:0.5.1'
     implementation 'androidx.activity:activity-compose:1.10.1'
     implementation 'androidx.compose.foundation:foundation:1.8.2'

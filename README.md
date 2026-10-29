@@ -18,13 +18,15 @@ Android 9 及以上，无需 Root。
 
 ## LSPosed 模式
 
-面向小米系系统，包含小米、Redmi、POCO，需要 Root 和 LSPosed。
+面向小米系系统，包含小米、Redmi、POCO，需要 Root 和支持 Modern Xposed API 101 及以上的 LSPosed（兼容 API 102）。
 
 1. 启用模块，勾选“小米浏览器 / com.android.browser”作用域。
 2. 打开应用，保存账号配置并开启“自动登录”。门户页面打开后会快速填写并提交。
 3. 使用“静默登录”时，再勾选“系统框架 / android”作用域并重启手机，即可在后台尝试认证。
 
 非小米设备的模块选项会灰显，仍可使用普通模式。模块安装或更新后需重启手机。
+
+1.4.1 起改用 libxposed Modern API 与框架远程配置，移除即将废弃的 New XSharedPreferences。覆盖更新会保留本地配置；从旧版升级后，请先在 LSPosed 确认启用及作用域，重启手机，再打开应用完成配置同步。模块选项会随框架服务连接状态更新。
 
 ## 功能与说明
 

@@ -12,7 +12,7 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-  <application android:label="门户自动登录" android:icon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
+  <application android:name=".PortalApplication" android:label="门户自动登录" android:description="@string/module_description" android:icon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
     <service android:name=".LoginRecoveryService" android:label="@string/login_recovery_name"
       android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
       <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
@@ -22,11 +22,6 @@
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         android:value="User-enabled event-driven Wi-Fi captive-portal authentication; waits for Wi-Fi changes and authenticates the user's configured portal without opening an Activity." />
     </service>
-    <meta-data android:name="xposedmodule" android:value="true" />
-    <meta-data android:name="xposeddescription" android:value="小米浏览器访客门户：本地配置、逐字输入、自动提交。" />
-    <meta-data android:name="xposedminversion" android:value="93" />
-    <meta-data android:name="xposedsharedprefs" android:value="true" />
-    <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
     <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.updates"
       android:exported="false" android:grantUriPermissions="true">
       <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />

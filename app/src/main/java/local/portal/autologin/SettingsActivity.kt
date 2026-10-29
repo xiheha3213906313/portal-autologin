@@ -64,7 +64,7 @@ class SettingsActivity : ComponentActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var login: AppLoginController
     private lateinit var accountStore: AccountStore
-    private var moduleAvailable = false
+    private val moduleAvailable: Boolean get() = ModuleBridge.available
     private val xiaomiSystem = DeviceCompatibility.supportsModule(Build.BRAND, Build.MANUFACTURER)
     private var showSettings by mutableStateOf(false)
     private var pendingSavedCheck by mutableStateOf(false)
@@ -110,7 +110,6 @@ class SettingsActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         val configuration = PortalPreferences.open(this)
-        moduleAvailable = configuration.moduleAvailable
         prefs = configuration.prefs
         showBackgroundSetup = savedInstanceState?.getBoolean("background_setup") == true &&
             !prefs.getBoolean("background_setup_completed", false)
@@ -118,6 +117,11 @@ class SettingsActivity : ComponentActivity() {
         login = AppLoginController.get(this)
         setContent {
             MiuixTheme(colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+                LaunchedEffect(moduleAvailable) {
+                    if (foreground) login.enterForeground(prefs, moduleAvailable && xiaomiSystem)
+                    else login.initialize(prefs, moduleAvailable && xiaomiSystem)
+                    refreshBackgroundAuthorization()
+                }
                 val updates = remember { AppUpdates.get(this@SettingsActivity) }
                 val showUpdate = rememberSaveable { mutableStateOf(false) }
                 val version = remember {
@@ -184,6 +188,7 @@ class SettingsActivity : ComponentActivity() {
         super.onResume()
         foreground = true
         setTaskHidden(false)
+        ModuleBridge.synchronize()
         login.enterForeground(prefs, moduleAvailable && xiaomiSystem)
         refreshBackgroundAuthorization()
     }
@@ -370,9 +375,9 @@ class SettingsActivity : ComponentActivity() {
                     .padding(horizontal = 20.dp).padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (error != null) {
+                if (error != null || ModuleBridge.syncFailed) {
                     Card(modifier = Modifier.fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
-                        Text(error ?: "")
+                        Text(error ?: "模块配置同步失败，请重新打开应用重试")
                     }
                 }
                 if (moduleAvailable) Card(modifier = Modifier.fillMaxWidth()) {
@@ -529,7 +534,10 @@ class SettingsActivity : ComponentActivity() {
                             if (prefs.edit().putBoolean("debug_log", value).commit()) {
                                 debugLog = value
                                 DiagnosticLog.setEnabled(value)
-                                if (value) BackgroundLoginService.recordState(this@SettingsActivity)
+                                if (value) {
+                                    BackgroundLoginService.recordState(this@SettingsActivity)
+                                    ModuleBridge.recordState()
+                                }
                                 sendBroadcast(Intent(SilentPortal.LOG_CONFIG).setPackage("android"))
                             } else error = "日志设置保存失败"
                         })
@@ -706,10 +714,11 @@ class SettingsActivity : ComponentActivity() {
         }.onFailure { Toast.makeText(this, "无法启动安装，请使用浏览器下载", Toast.LENGTH_LONG).show() }
     }
     private fun notifyConfigChanged() {
-        sendBroadcast(Intent(SilentPortal.ACTION).setPackage("android"))
+        ModuleBridge.synchronize()
     }
     private fun requestLogExport() {
         BackgroundLoginService.recordState(this)
+        ModuleBridge.recordState()
         sendOrderedBroadcast(Intent(SilentPortal.LOG_EXPORT).setPackage("android"), null,
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
