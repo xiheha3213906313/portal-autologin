@@ -2,7 +2,7 @@
 
 用于字节跳动访客 Wi-Fi 的 Android 自动认证工具，提供无需 Root 的普通模式和小米系 LSPosed 模式，采用 Miuix 界面。
 
-[下载安装包](https://github.com/xiheha3213906313/portal-autologin/releases/latest) · [公开源码](https://github.com/xiheha3213906313/portal-autologin/tree/feature/silent-login) · [更新记录](https://github.com/xiheha3213906313/portal-autologin/releases) · [反馈问题](https://github.com/xiheha3213906313/portal-autologin/issues)
+[下载安装包](https://github.com/xiheha3213906313/portal-autologin/releases/latest) · [公开源码](https://github.com/xiheha3213906313/portal-autologin/tree/main) · [更新记录](https://github.com/xiheha3213906313/portal-autologin/releases) · [安装包归档](https://github.com/xiheha3213906313/portal-autologin/tree/Release) · [反馈问题](https://github.com/xiheha3213906313/portal-autologin/issues)
 
 ## 普通模式
 

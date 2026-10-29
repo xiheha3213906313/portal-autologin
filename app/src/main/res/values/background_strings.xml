@@ -1,0 +1,4 @@
+<resources>
+    <string name="login_recovery_name">门户登录后台辅助</string>
+    <string name="login_recovery_description">仅在系统接入此服务时，尝试恢复你已开启的 Wi-Fi 后台登录。不读取屏幕、不代点操作；不是无障碍辅助工具，也不保证保活。后台自动登录关闭时不进行恢复。</string>
+</resources>

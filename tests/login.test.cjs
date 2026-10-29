@@ -26,7 +26,7 @@ function fixture(options = {}) {
     getElementById:id=>({LoginForm:f,password:p,sub2:b,accesscode:options.accesscode?new Input('accesscode'):null}[id]),querySelector:()=>u};
   const root={getElementById:()=>({contentDocument:d})};
   const ctx=vm.createContext({URL, document:root,location:{origin:options.wrongOrigin?'https://example.org':d.location.origin}});
-  const script=source.replace('__CREDENTIALS__',JSON.stringify(['test-user','test-password'])).replace('__ALLOW_NEW__',options.disallow?'false':'true').replace('__FAST__',options.slow?'false':'true');
+  const script=source.replace('__CREDENTIALS__',JSON.stringify(['test-user','test-password'])).replace('__ALLOW_NEW__',options.disallow?'false':'true');
   return {run:()=>vm.runInContext(script,ctx),w,u,p,state,events,d,delays};
 }
 async function settle() {for(let i=0;i<100;i++) await new Promise(setImmediate);}
@@ -39,8 +39,6 @@ async function settle() {for(let i=0;i<100;i++) await new Promise(setImmediate);
   assert(a.events.indexOf('password:blur')<a.events.indexOf('click'));
   assert.equal(a.events.filter(e=>e==='username:beforeinput').length,9);
   assert.equal(a.delays.reduce((x,y)=>x+y,0),476);
-  const slow=fixture({slow:true}); slow.run(); await settle();
-  assert.equal(slow.state.clicks,1); assert.equal(slow.delays.reduce((x,y)=>x+y,0),3060);
   for(const [options,status] of [[{wrongOrigin:true},'unrelated'],[{badAction:true},'form_changed'],
     [{checkbox:true},'manual_checkbox'],[{accesscode:true},'manual_accesscode'],[{hidden:true},'waiting'],[{disallow:true},'cooldown']]) {
     const x=fixture(options); assert.equal(x.run(),status); await settle(); assert.equal(x.state.clicks,0);

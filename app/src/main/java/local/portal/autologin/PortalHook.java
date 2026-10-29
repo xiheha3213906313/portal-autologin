@@ -20,51 +20,83 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XSharedPreferences;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import android.content.SharedPreferences;
+import io.github.libxposed.api.XposedModule;
 
-public class PortalHook implements IXposedHookLoadPackage {
-    private static final String MODULE = "local.portal.autologin";
+public class PortalHook extends XposedModule {
     private static final String ACTIVITY = "com.android.captiveportallogin.CaptivePortalLoginActivity";
     private static final Map<Activity, Session> sessions = new WeakHashMap<>();
     private static final Map<Class<?>, Method> evalMethods = new HashMap<>();
     private static long nextAttempt;
 
-    @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) throws Throwable {
-        if (!"com.android.browser".equals(p.packageName)) return;
-        XposedBridge.log("PortalAuto: browser hook loaded");
-        XposedHelpers.findAndHookMethod(Activity.class, "onResume", new XC_MethodHook() {
-            @Override protected void afterHookedMethod(MethodHookParam param) {
-                Activity a = (Activity)param.thisObject;
-                if (!ACTIVITY.equals(a.getClass().getName())) return;
+    private boolean browserHooked, systemHooked;
+
+    @Override public void onModuleLoaded(ModuleLoadedParam p) {
+        ModuleRuntime.install(this);
+    }
+
+    @Override public void onSystemServerStarting(SystemServerStartingParam p) {
+        if (!DeviceCompatibility.supportsModule(android.os.Build.BRAND, android.os.Build.MANUFACTURER)) return;
+        if (!systemHooked) {
+            try {
+                Class<?> server=Class.forName("com.android.server.SystemServer",false,p.getClassLoader());
+                for(Method method:server.getDeclaredMethods()) if(method.getName().equals("startOtherServices")) {
+                    hook(method).intercept(chain -> {
+                        Object result=chain.proceed();
+                        try {
+                            Class<?> type=Class.forName("android.app.ActivityThread");
+                            Method current=type.getDeclaredMethod("currentActivityThread");current.setAccessible(true);
+                            Object thread=current.invoke(null);
+                            Method getContext=type.getDeclaredMethod("getSystemContext");getContext.setAccessible(true);
+                            android.content.Context context=(android.content.Context)getContext.invoke(thread);
+                            SilentPortal.start(context);
+                        } catch(Throwable e) {logError("silent_start",e);}
+                        return result;
+                    });
+                }
+                systemHooked=true;
+            } catch(Throwable e) {logError("system_hook",e);}
+        }
+    }
+
+    @Override public void onPackageReady(PackageReadyParam p) {
+        if (!DeviceCompatibility.supportsModule(android.os.Build.BRAND, android.os.Build.MANUFACTURER) ||
+            !"com.android.browser".equals(p.getPackageName()) || browserHooked) return;
+        try {
+        hook(Activity.class.getDeclaredMethod("onResume")).intercept(chain -> {
+            Object result=chain.proceed();
+            Activity a=(Activity)chain.getThisObject();
+            if (ACTIVITY.equals(a.getClass().getName())) {
                 try {
                     Session s = sessions.get(a);
                     if (s == null) { s = new Session(a); sessions.put(a, s); }
                     s.resume();
                 } catch (Throwable e) { logError("resume", e); }
             }
+            return result;
         });
-        XposedHelpers.findAndHookMethod(Activity.class, "onPause", new XC_MethodHook() {
-            @Override protected void beforeHookedMethod(MethodHookParam param) {
-                Session s = sessions.get((Activity)param.thisObject);
+        hook(Activity.class.getDeclaredMethod("onPause")).intercept(chain -> {
+            try {
+                Session s = sessions.get((Activity)chain.getThisObject());
                 if (s != null) s.pause();
-            }
+            } catch(Throwable e) {logError("pause",e);}
+            return chain.proceed();
         });
-        XposedHelpers.findAndHookMethod(Activity.class, "onDestroy", new XC_MethodHook() {
-            @Override protected void beforeHookedMethod(MethodHookParam param) {
-                Session s = sessions.remove((Activity)param.thisObject);
+        hook(Activity.class.getDeclaredMethod("onDestroy")).intercept(chain -> {
+            try {
+                Session s = sessions.remove((Activity)chain.getThisObject());
                 if (s != null) s.pause();
-            }
+            } catch(Throwable e) {logError("destroy",e);}
+            return chain.proceed();
         });
+        browserHooked=true;
+        ModuleRuntime.log("browser hook loaded");
+        } catch(Throwable e) {logError("browser_hook",e);}
     }
 
     private static void logError(String where, Throwable e) {
         // Never log JS source, credentials, URL parameters or exception messages.
-        XposedBridge.log("PortalAuto: " + where + " " + e.getClass().getSimpleName());
+        ModuleRuntime.log(where + " " + e.getClass().getSimpleName());
     }
 
     private static Method evaluator(View v) {
@@ -103,20 +135,20 @@ public class PortalHook implements IXposedHookLoadPackage {
         void resume() {
             pause();
             try {
-                XSharedPreferences prefs = new XSharedPreferences(MODULE, "portal");
-                prefs.reload();
+                SharedPreferences prefs = ModuleRuntime.preferences();
                 if (!prefs.getBoolean("enabled", false)) {
-                    XposedBridge.log("PortalAuto: disabled or configuration unavailable"); return;
+                    ModuleRuntime.log("disabled or configuration unavailable"); return;
                 }
+                // Silent mode controls the background attempt, not the foreground fallback.
+                // Standard portal launches are gated in system_server while that attempt is active.
                 String user = prefs.getString("username", "");
                 String pass = prefs.getString("password", "");
                 if (user.isEmpty() || pass.isEmpty()) return;
-                script = LoginScript.CODE.replace("__FAST__", prefs.getBoolean("fast", true) ? "true" : "false")
-                    .replace("__CREDENTIALS__", new JSONArray().put(user).put(pass).toString());
+                script = LoginScript.CODE.replace("__CREDENTIALS__", new JSONArray().put(user).put(pass).toString());
                 active = true;
                 deadline = SystemClock.elapsedRealtime() + 120000;
                 handler.postDelayed(this, 150);
-                XposedBridge.log("PortalAuto: portal resumed");
+                ModuleRuntime.log("portal resumed");
             } catch (Throwable e) { logError("configuration", e); }
         }
 
@@ -144,7 +176,7 @@ public class PortalHook implements IXposedHookLoadPackage {
 
         void message(String key, String text) {
             if (messages.add(key)) {
-                XposedBridge.log("PortalAuto: " + key);
+                ModuleRuntime.log(key);
                 Toast.makeText(activity, text, Toast.LENGTH_LONG).show();
             }
         }

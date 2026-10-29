@@ -12,3 +12,5 @@
 .env.*
 /toolchain/*
 !/toolchain/SOURCES.txt
+/.kotlin/
+/private-preset/

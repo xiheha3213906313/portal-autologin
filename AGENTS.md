@@ -4,7 +4,7 @@
 
 ## 先对齐任务与源码
 
-- 仓库为 `xiheha3213906313/portal-autologin`，应用包名为 `local.portal.autologin`，作者为 xiheha。截至本文件整理时，完整的持续开发源码在 `feature/silent-login`；`main` 是默认分支，但部分实现较旧。开始前核对当前分支、远端及未提交改动，不凭默认分支推断最新实现，也不自动合并两条分支。
+- 仓库为 `xiheha3213906313/portal-autologin`，应用包名为 `local.portal.autologin`，作者为 xiheha。`main` 是默认分支，维护完整最新源码；`Release`（注意大小写）统一维护各版本安装包及校验文件，不用于应用开发。开始前核对当前分支、远端及未提交改动；版本更新沿用这两个分支，不按版本新建分支。
 - 当前适配字节跳动访客门户，已知入口是 `https://captiveportal-login.bytedance.net:1026/index.html`。不能把“普通模式支持其他安卓品牌”写成“支持任意 Wi-Fi 门户”。新增门户需另行确认协议。
 - 用户说“先讨论、探讨、看看方案”时，先说明现有条件、可行路径和需要验证的点；说“改一下、开干、修复”时落实修改与适当验证。“推送”和“发布安装包”分别按当前请求执行；历史发布记录不等于本次发布授权。
 - 优先从代码、已有日志和仓库文档获取信息；确实缺真机证据时，再请用户做一次有明确目的的操作。不要重复索取已经提供的手机环境、日志或账号。
@@ -19,7 +19,7 @@
 - 模块与配置：`PortalHook.java`、`SilentPortal.java`、`ModuleBridge.kt`、`ModuleRuntime.java`、`UnifiedPreferences.kt`、`PreferenceSnapshot.java`、`RemoteConfigMirror.kt`；前台填写在 `app/src/main/assets/login.js`，模块声明在 `app/src/main/resources/META-INF/xposed/`。
 - 更新与分享：`AppUpdates.kt`、`ReleaseHistory.java`、`ReleaseRules.java`、`ReleaseNotesText.java`、`UpdateCard.kt`、`ShareAccountsPage.kt`；诊断在 `DiagnosticLog.java`。
 
-涉及后台生命周期、授权或漏检时读 `docs/background-login.md`；涉及 Hook、作用域和远程同步时读 `docs/modern-xposed.md`。如果当前分支没有这些文档，去核对当前开发源码分支，避免根据旧实现修改。无需为纯界面微调加载全部协议细节。
+涉及后台生命周期、授权或漏检时读 `docs/background-login.md`；涉及 Hook、作用域和远程同步时读 `docs/modern-xposed.md`。如果当前分支没有这些文档，先核对 `main` 的最新源码，避免在安装包归档分支或旧标签上修改。无需为纯界面微调加载全部协议细节。
 
 ## 认证与模式边界
 
@@ -68,6 +68,7 @@
 - 发布 APK 时核对包名、两个版本字段、沿用签名及对齐；Hook 或 API 迁移还需检查最终包内入口、作用域、混淆保留和旧接口残留。不能用新签名冒充可覆盖安装；缺签名材料时明确说明具体缺口。
 - 版本读取以 `app/build.gradle` 和最终 APK 为准，留意 `build.sh` 中可能滞后的输出文件名。复用现有工具链与已有构建入口，不将旧云环境绝对路径写成通用要求。
 - 在已获授权的范围内完成提交、推送和发布。源码分支、源码标签、APK、ZIP、SHA-256 与发布说明应对应同一份改动。替换同版包按用户要求保留版本；移动既有标签仅在当前授权涵盖时处理，遇到远端变化先核对，不强推覆盖未知工作。
+- `Release` 按 `release-assets/v版本号/` 保存 APK、ZIP 与 SHA-256 文件，保留既有版本目录。客户端通过 GitHub Releases API 获取版本和说明，再从附件或说明提取下载链接，不通过分支名检测版本。迁移归档、清理引用前核验旧下载链接；保留归档提交的可达历史，不对 `Release` 做会丢失旧提交的强推、压缩或重建。源码标签和历史 Release 继续保留。
 - 正常发版说明完整覆盖上个正式版以来的改动、使用变化及必要升级操作；用户指定“更新描述不变”时保留。README 按当前两种模式、使用方法和必要限制整体整理，保持简洁，不堆历史更新流水。
 - 同版包替换需说明重新下载覆盖安装，相同版号不会触发新版本提示。发布后回下载或核验公开下载文件及校验值，不能仅凭上传或 API 成功就宣称可用。主附件接口不可用时，先检查现有仓库包和发布页链接方案；认证失败且无可用路径时停止重复写入并说明缺口。
 - 不在开发约定、公开源码或诊断日志写入真实账密、Cookie、令牌或签名材料。历史上获准打包的预设不扩大为公开新凭据的授权；仅沿用范围明确的既有批准。诊断记录阶段、结果和异常类型，关闭日志时隐藏导出、清空按钮。
