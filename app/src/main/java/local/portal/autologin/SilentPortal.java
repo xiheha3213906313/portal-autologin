@@ -27,6 +27,7 @@ public final class SilentPortal {
     private final AtomicBoolean configChanged=new AtomicBoolean();
     private final Runnable configUpdate;
     private final LinkedHashMap<Network,Attempt> attempts=new LinkedHashMap<>();
+    private final LinkedHashMap<Network,Integer> capabilityStates=new LinkedHashMap<>();
     private final ExecutorService worker=new ThreadPoolExecutor(0,1,30,TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(2),r->{Thread t=new Thread(r,"PortalAuth");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private static class Config {
@@ -109,6 +110,13 @@ public final class SilentPortal {
                 if(LOG_EXPORT.equals(i.getAction())) {
                     setResultCode(-1);
                     synchronized(attempts) {
+                        SharedPreferences saved=ModuleRuntime.preferences();
+                        int flags=(saved.getBoolean("enabled",false)?1:0) |
+                            (saved.getBoolean("silent",false)?2:0) |
+                            (saved.getString("username","").isEmpty()?0:4) |
+                            (saved.getString("password","").isEmpty()?0:8);
+                        DiagnosticLog.event("config.native_flags",flags);
+                        DiagnosticLog.event("network.active_vpn",activeVpn()?1:0);
                         setResultData("observer=ready\nlaunch_hooks="+launchHookCount+"\nattempt_records="+attempts.size()+"\n"+DiagnosticLog.snapshot());
                     }
                     return;
@@ -131,13 +139,21 @@ public final class SilentPortal {
         NetworkRequest request=new NetworkRequest.Builder()
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_TRUSTED)
-            .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build();
         cm.registerNetworkCallback(request,new ConnectivityManager.NetworkCallback() {
             @Override public void onCapabilitiesChanged(Network n,NetworkCapabilities caps) {
-                DiagnosticLog.event("network.capabilities",(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)?1:0) |
-                    (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)?2:0));
+                if(!realWifi(caps)) return;
+                int flags=(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)?1:0) |
+                    (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)?2:0);
+                synchronized(attempts) {
+                    Integer previous=capabilityStates.put(n,flags);
+                    if(previous==null || previous!=flags) {
+                        DiagnosticLog.event("network.id",n.hashCode());
+                        DiagnosticLog.event("network.capabilities",flags);
+                    }
+                    if(capabilityStates.size()>16) capabilityStates.remove(capabilityStates.keySet().iterator().next());
+                }
                 if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
                     synchronized(attempts) {
                         Attempt a=attempts.get(n);
@@ -146,8 +162,12 @@ public final class SilentPortal {
                 } else request(n);
             }
             @Override public void onLost(Network n) {
+                DiagnosticLog.event("network.id",n.hashCode());
                 DiagnosticLog.event("network.lost",0);
-                synchronized(attempts) { Attempt a=attempts.remove(n);if(a!=null)a.active=false; }
+                synchronized(attempts) {
+                    capabilityStates.remove(n);
+                    Attempt a=attempts.remove(n);if(a!=null)a.active=false;
+                }
             }
         },handler);
         hookPortalLaunch();
@@ -168,11 +188,23 @@ public final class SilentPortal {
     }
     @android.annotation.SuppressLint("MissingPermission")
     private void scan() { try { DiagnosticLog.event("network.scan",0);for(Network n:cm.getAllNetworks()) request(n); } catch(Throwable e) {DiagnosticLog.failure(e);} }
+    private static boolean realWifi(NetworkCapabilities caps) {
+        return caps!=null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+    }
+    @android.annotation.SuppressLint("MissingPermission")
+    private boolean activeVpn() {
+        try {
+            Network active=cm.getActiveNetwork();
+            NetworkCapabilities caps=active==null?null:cm.getNetworkCapabilities(active);
+            return caps!=null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+        } catch(Throwable ignored) {return false;}
+    }
     @android.annotation.SuppressLint("MissingPermission")
     private boolean captive(Network n) {
         try {
             NetworkCapabilities c=cm.getNetworkCapabilities(n);
-            return c!=null && c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            return realWifi(c) &&
                 c.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) &&
                 !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
         } catch(Throwable ignored) { return false; }
@@ -211,9 +243,10 @@ public final class SilentPortal {
     }
     @android.annotation.SuppressLint("MissingPermission") // Runs under the system_server UID.
     private void authenticate(Network n,Attempt a,Config c) {
+        DiagnosticLog.event("attempt.network",n.hashCode());
         log("attempt_started");
         try {
-            new PortalHttpClient(url->(java.net.HttpURLConnection)n.openConnection(url),()->allowed(n,a),(stage,detail)->{
+            new PortalHttpClient(new NetworkPortalTransport(n),()->allowed(n,a),(stage,detail)->{
                 DiagnosticLog.event(stage,detail);
                 if("submit.write_begin".equals(stage)) synchronized(attempts) {
                     if(!a.active || SystemClock.elapsedRealtime()<applicationLeaseUntil)
@@ -224,11 +257,13 @@ public final class SilentPortal {
             synchronized(attempts) {a.posted=true;}
             log("submitted_waiting_validation");
             requestValidation(n,a);
+            verifyInternet(n,a);
         } catch(PortalHttpClient.SubmissionUncertainException e) {
             // A closed response is not an auth rejection. Check the same network without reposting.
             DiagnosticLog.failure(e);
             DiagnosticLog.event("submission.uncertain_waiting_validation",0);
             requestValidation(n,a);
+            verifyInternet(n,a);
         } catch(Throwable e) {
             synchronized(attempts) {
                 a.active=false;
@@ -238,6 +273,22 @@ public final class SilentPortal {
             log("fallback_"+e.getClass().getSimpleName());
             DiagnosticLog.failure(e);
         } finally {c.user=null;c.pass=null;}
+    }
+    @android.annotation.SuppressLint("MissingPermission") // Runs once on the authentication worker.
+    private void verifyInternet(Network n,Attempt a) {
+        DiagnosticLog.event("validation.internet_network",n.hashCode());
+        InternetCheck.Result result=new InternetCheck(
+            url->(java.net.HttpURLConnection)n.openConnection(url),
+            ()->{
+                synchronized(attempts) {
+                    if(!a.active || attempts.get(n)!=a || SystemClock.elapsedRealtime()-a.start>=45000) return false;
+                }
+                try {return realWifi(cm.getNetworkCapabilities(n));}
+                catch(Throwable ignored) {return false;}
+            },(stage,detail)->DiagnosticLog.event("validation."+stage,detail)).run();
+        DiagnosticLog.event("validation.internet_result",result.ordinal());
+        // This is additional evidence, not permission to resend a POST or switch to mobile data.
+        if(result==InternetCheck.Result.ONLINE) requestValidation(n,a);
     }
     @android.annotation.SuppressLint("MissingPermission") // Runs under the system_server UID.
     private void requestValidation(Network n,Attempt a) {

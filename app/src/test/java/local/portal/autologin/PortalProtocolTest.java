@@ -142,4 +142,64 @@ public class PortalProtocolTest {
         assertTrue(trace.contains("form.field.checkbox1 1"));assertTrue(trace.contains("form.field.accesscode 0"));
         assertFalse(trace.toString().contains("PRIVATE_COOKIE"));assertFalse(trace.toString().contains("private-password"));
     }
+
+    @Test public void dedicatedPostAvoidsTheReadPoolAndKeepsCookiesAndFormData() throws Exception {
+        List<Fake> reads=new ArrayList<>();List<Fake> posts=new ArrayList<>();
+        PortalHttpClient.Transport transport=new PortalHttpClient.Transport() {
+            public HttpURLConnection open(URL u) {
+                if(reads.size()>=2) throw new AssertionError("POST must not reuse the read pool");
+                Fake f=new Fake(u,reads.isEmpty()?"<iframe id=leftFrame src=/login.html>":FORM,200);
+                if(reads.isEmpty()) f.headers.put("Set-Cookie",Arrays.asList("sid=fresh; Path=/; Secure"));
+                reads.add(f);return f;
+            }
+            public HttpURLConnection openForSubmission(URL u) {
+                Fake f=new Fake(u,"",302);posts.add(f);return f;
+            }
+        };
+        new PortalHttpClient(transport,()->true).login("demo","a +&密");
+        assertEquals(2,reads.size());assertEquals(1,posts.size());
+        Fake post=posts.get(0);
+        assertEquals("POST",post.getRequestMethod());
+        assertTrue(post.getRequestProperty("Cookie").contains("sid=fresh"));
+        assertEquals(body(FORM),post.sent.toString("UTF-8"));
+        assertEquals("keep-alive",post.getRequestProperty("Connection"));
+        assertEquals(ROOT,post.getRequestProperty("Origin"));
+        assertFalse(post.getInstanceFollowRedirects());
+    }
+
+    @Test public void uncertainDedicatedPostIsNeverReplayedOrMovedToTheReadPool() throws Exception {
+        int[] reads={0},posts={0};List<Fake> sent=new ArrayList<>();
+        PortalHttpClient.Transport transport=new PortalHttpClient.Transport() {
+            public HttpURLConnection open(URL u) {
+                if(++reads[0]>2) throw new AssertionError("No fallback submission on the read pool");
+                return new Fake(u,reads[0]==1?"<iframe id=leftFrame src=/login.html>":FORM,200);
+            }
+            public HttpURLConnection openForSubmission(URL u) {
+                posts[0]++;
+                Fake f=new Fake(u,"",200) {
+                    @Override public int getResponseCode() throws IOException {throw new EOFException();}
+                };
+                sent.add(f);return f;
+            }
+        };
+        try {new PortalHttpClient(transport,()->true).login("demo","pw");fail();}
+        catch(PortalHttpClient.SubmissionUncertainException expected) { }
+        assertEquals(2,reads[0]);assertEquals(1,posts[0]);assertTrue(sent.get(0).sent.size()>0);
+    }
+
+    @Test public void failureOpeningDedicatedPostDoesNotFallBackToAnotherTransport() throws Exception {
+        int[] reads={0},posts={0};
+        PortalHttpClient.Transport transport=new PortalHttpClient.Transport() {
+            public HttpURLConnection open(URL u) {
+                if(++reads[0]>2) throw new AssertionError("No retry through the read pool");
+                return new Fake(u,reads[0]==1?"<iframe id=leftFrame src=/login.html>":FORM,200);
+            }
+            public HttpURLConnection openForSubmission(URL u) throws IOException {
+                posts[0]++;throw new javax.net.ssl.SSLHandshakeException("handshake_failed");
+            }
+        };
+        try {new PortalHttpClient(transport,()->true).login("demo","pw");fail();}
+        catch(javax.net.ssl.SSLHandshakeException expected) { }
+        assertEquals(2,reads[0]);assertEquals(1,posts[0]);
+    }
 }

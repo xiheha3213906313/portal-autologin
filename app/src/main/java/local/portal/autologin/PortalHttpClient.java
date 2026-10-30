@@ -11,7 +11,11 @@ public final class PortalHttpClient {
     public static final class SubmissionUncertainException extends IOException {
         SubmissionUncertainException(IOException cause) { super("submission_response_unavailable",cause); }
     }
-    public interface Transport { HttpURLConnection open(URL url) throws Exception; }
+    public interface Transport {
+        HttpURLConnection open(URL url) throws Exception;
+        /** A bound transport may isolate the first POST from the GET connection pool. No retry. */
+        default HttpURLConnection openForSubmission(URL url) throws Exception { return open(url); }
+    }
     public interface Guard { boolean allowed(); }
     public interface Trace { void event(String stage,int detail); }
     private final Transport transport;
@@ -34,7 +38,7 @@ public final class PortalHttpClient {
     private Page request(URL url, String body, URL referer,String phase) throws Exception {
         check(); PortalProtocol.trusted(url.toString());
         trace.event(phase+".open",0);
-        HttpURLConnection c=transport.open(url);
+        HttpURLConnection c=body==null?transport.open(url):transport.openForSubmission(url);
         boolean payloadStarted=false;
         try {
             c.setConnectTimeout(5000); c.setReadTimeout(5000); c.setInstanceFollowRedirects(false);

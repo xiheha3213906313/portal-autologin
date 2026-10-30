@@ -345,7 +345,7 @@ class AppLoginController private constructor(private val context: Context) {
         val user = prefs.getString("username", "") ?: ""
         val pass = prefs.getString("password", "") ?: ""
         try { worker.execute {
-            val result = PortalLoginTask.run(PortalHttpClient({ url -> job.network.openConnection(url) as HttpURLConnection }, {
+            val result = PortalLoginTask.run(PortalHttpClient(NetworkPortalTransport(job.network), {
                 job.active && (job.ignoreValidation || !validated(job.network)) && connected(job.network)
             }, { stage, detail ->
                 DiagnosticLog.event("app.$stage", detail)

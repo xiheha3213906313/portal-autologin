@@ -100,6 +100,13 @@ internal object ModuleBridge {
     fun recordState() {
         DiagnosticLog.event("module.service_available", if (available) 1 else 0)
         DiagnosticLog.event("module.config_sync_failed", if (syncFailed) 1 else 0)
+        source?.let { saved ->
+            val flags = (if (saved.getBoolean("enabled", false)) 1 else 0) or
+                (if (saved.getBoolean("silent", false)) 2 else 0) or
+                (if (saved.getString("username", "").isNullOrEmpty()) 0 else 4) or
+                (if (saved.getString("password", "").isNullOrEmpty()) 0 else 8)
+            DiagnosticLog.event("module.local_config_flags", flags)
+        }
     }
 
     private fun onMain(action: () -> Unit) {
