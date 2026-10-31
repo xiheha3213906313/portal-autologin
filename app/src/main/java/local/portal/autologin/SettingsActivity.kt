@@ -218,8 +218,11 @@ class SettingsActivity : ComponentActivity() {
             (prefs as? UnifiedPreferences)?.initializationFailed == true) "配置读取失败，请重试" else null) }
         var savedFeedback by remember { mutableStateOf(false) }
         var savedAccounts by remember { mutableStateOf(accountStore.accounts) }
+        val presetUpdates = remember { AccountPresetUpdates.get(this@SettingsActivity) }
         var selectedPreset by remember {
-            mutableStateOf(accountStore.accounts.firstOrNull { it.bundled && it.username == username }?.username)
+            mutableStateOf(accountStore.accounts.firstOrNull {
+                it.bundled && it.username == username && it.password == password
+            }?.username)
         }
         var savedUsername by remember { mutableStateOf(username.trim()) }
         var savedPassword by remember { mutableStateOf(password) }
@@ -320,6 +323,12 @@ class SettingsActivity : ComponentActivity() {
         }
         LaunchedEffect(savedFeedback) {
             if (savedFeedback) { delay(1800); savedFeedback=false }
+        }
+        LaunchedEffect(presetUpdates.revision) {
+            savedAccounts = accountStore.accounts
+            if (selectedPreset != null && savedAccounts.none {
+                it.bundled && it.username == username.trim() && it.password == password
+            }) selectedPreset = null
         }
         LaunchedEffect(username,password,enabled,silent,forceLogin,backgroundLogin,wifiFilter) {
             savedFeedback=false
@@ -469,6 +478,8 @@ class SettingsActivity : ComponentActivity() {
                                 focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
                             }), trailingIcon = {
                                 AccountPicker(show = accountPicker, accounts = savedAccounts,
+                                    fetching = presetUpdates.fetching, feedback = presetUpdates.feedback,
+                                    onRefresh = { presetUpdates.refresh() },
                                     onOpen = {
                                         focus.clearFocus(); savedAccounts = accountStore.accounts
                                         accountPicker.value = !accountPicker.value

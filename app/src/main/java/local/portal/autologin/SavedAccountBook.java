@@ -66,6 +66,29 @@ final class SavedAccountBook {
         }
         return changed;
     }
+    boolean replacePresets(List<Account> presets) {
+        LinkedHashMap<String,Account> pending=new LinkedHashMap<>();
+        for(Account preset:presets)if(!valid(preset.username,preset.password) || pending.put(preset.username,preset)!=null)
+            throw new IllegalArgumentException("invalid_presets");
+        LinkedHashSet<String> identifiers=new LinkedHashSet<>(pending.keySet());
+        ArrayList<Account> updated=new ArrayList<>();
+        for(Account existing:accounts) {
+            Account replacement=pending.remove(existing.username);
+            if(!existing.bundled)updated.add(existing); // Local entries win a username collision.
+            else if(replacement!=null)updated.add(new Account(replacement.username,replacement.password,replacement.label,true));
+        }
+        for(Account preset:pending.values())updated.add(new Account(preset.username,preset.password,preset.label,true));
+        boolean changed=updated.size()!=accounts.size() || !importedPresets.equals(identifiers);
+        if(!changed)for(int i=0;i<updated.size();i++) {
+            Account a=updated.get(i),b=accounts.get(i);
+            if(!a.username.equals(b.username) || !a.password.equals(b.password) || !a.label.equals(b.label) || a.bundled!=b.bundled) {
+                changed=true;break;
+            }
+        }
+        if(updated.size()>10000)throw new IllegalArgumentException("invalid_presets");
+        accounts.clear();accounts.addAll(updated);importedPresets.clear();importedPresets.addAll(identifiers);
+        return changed;
+    }
     boolean remove(String username) { return accounts.removeIf(a->!a.bundled && a.username.equals(username.trim())); }
     void clear() { accounts.removeIf(a->!a.bundled);migrated=true; }
     private static boolean valid(String user,String pass) {

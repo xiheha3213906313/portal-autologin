@@ -5,6 +5,35 @@ import java.util.*;
 import static org.junit.Assert.*;
 
 public class SavedAccountBookTest {
+    @Test public void remotePresetsUpdatePasswordsAndNamesWithoutChangingCustomAccountsOrOrder() {
+        SavedAccountBook b=new SavedAccountBook();
+        b.remember("custom-a","private-a");
+        b.seed(Arrays.asList(new SavedAccountBook.Account("preset-a","old","旧名")));
+        b.remember("custom-b","private-b");
+        b.replacePresets(Arrays.asList(new SavedAccountBook.Account("preset-a","new","新名"),
+            new SavedAccountBook.Account("preset-b","other","新增")));
+        b=SavedAccountBook.decode(b.encode());
+        assertEquals("custom-a",b.getAccounts().get(0).username);assertEquals("private-a",b.getAccounts().get(0).password);
+        assertEquals("preset-a",b.getAccounts().get(1).username);assertEquals("new",b.getAccounts().get(1).password);
+        assertEquals("新名",b.getAccounts().get(1).label);assertFalse(b.remove("preset-a"));
+        assertEquals("custom-b",b.getAccounts().get(2).username);assertEquals("preset-b",b.getAccounts().get(3).username);
+    }
+    @Test public void customUsernameCollisionWinsAndRemovedRemoteEntriesDoNotDeleteCustomEntries() {
+        SavedAccountBook b=new SavedAccountBook();b.remember("same","private");
+        b.seed(Arrays.asList(new SavedAccountBook.Account("removed","old","旧预设")));
+        b.replacePresets(Arrays.asList(new SavedAccountBook.Account("same","remote","远端")));
+        assertEquals(1,b.getAccounts().size());assertEquals("private",b.getAccounts().get(0).password);
+        assertFalse(b.getAccounts().get(0).bundled);assertTrue(b.remove("same"));
+    }
+    @Test public void emptyRemoteCatalogOnlyRemovesPresetsAndDuplicateInputDoesNotMutateBook() {
+        SavedAccountBook b=new SavedAccountBook();b.remember("custom","mine");
+        b.seed(Arrays.asList(new SavedAccountBook.Account("preset","p","预设")));
+        List<SavedAccountBook.Account> duplicate=Arrays.asList(new SavedAccountBook.Account("new","a","甲"),
+            new SavedAccountBook.Account("new","b","乙"));
+        try {b.replacePresets(duplicate);fail();}catch(IllegalArgumentException expected){}
+        assertEquals(2,b.getAccounts().size());b.replacePresets(Collections.emptyList());
+        assertEquals(1,b.getAccounts().size());assertEquals("custom",b.getAccounts().get(0).username);
+    }
     private SavedAccountBook.Account preset(String user,String pass,String label) {
         return new SavedAccountBook.Account(user,pass,label);
     }

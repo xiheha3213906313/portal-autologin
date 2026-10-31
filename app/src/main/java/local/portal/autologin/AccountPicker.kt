@@ -17,11 +17,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.*
 import top.yukonga.miuix.kmp.basic.*
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.icons.useful.Refresh
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun AccountPicker(show: MutableState<Boolean>, accounts: List<SavedAccountBook.Account>,
+                           fetching: Boolean, feedback: String?, onRefresh: () -> Unit,
                            onOpen: () -> Unit, onSelect: (SavedAccountBook.Account) -> Unit,
                            onNew: () -> Unit,
                            onDelete: (SavedAccountBook.Account) -> Unit) {
@@ -42,9 +47,25 @@ internal fun AccountPicker(show: MutableState<Boolean>, accounts: List<SavedAcco
         ListPopup(show = show, onDismissRequest = { pendingDelete = null; show.value = false }, maxHeight = 300.dp,
             enableWindowDim = false) {
             ListPopupColumn {
-                Text("使用其他账号", fontSize = 14.sp, color = MiuixTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { pendingDelete = null; onNew() }
-                        .padding(horizontal = 14.dp, vertical = 12.dp))
+                Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(feedback ?: "使用其他账号", fontSize = 14.sp, color = MiuixTheme.colorScheme.primary,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).clickable(role = Role.Button) { pendingDelete = null; onNew() }
+                            .padding(vertical = 12.dp))
+                    val rotation = if (fetching) {
+                        val transition = rememberInfiniteTransition(label = "presetRefresh")
+                        val angle by transition.animateFloat(0f, 360f,
+                            infiniteRepeatable(tween(800, easing = LinearEasing)), label = "rotation")
+                        angle
+                    } else 0f
+                    IconButton(onClick = { pendingDelete = null; onRefresh() }, enabled = !fetching,
+                        backgroundColor = Color.Transparent, minWidth = 40.dp, minHeight = 40.dp) {
+                        Icon(MiuixIcons.Useful.Refresh, contentDescription = "获取最新预设",
+                            modifier = Modifier.size(18.dp).rotate(rotation),
+                            tint = MiuixTheme.colorScheme.primary)
+                    }
+                }
                 if (accounts.isEmpty()) {
                     Text("暂无保存账号", fontSize = 14.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,

@@ -2,6 +2,8 @@
 
 本目录统一保存门户自动登录各正式版本的 APK、ZIP 备用包与 SHA-256 校验文件。完整最新源码在 [main](https://github.com/xiheha3213906313/portal-autologin/tree/main)，更新说明与最新版下载见 [发布页](https://github.com/xiheha3213906313/portal-autologin/releases)。
 
+[在线预设](account-presets.json) 独立于安装包维护，文件格式和更新方式见 [预设维护说明](../docs/account-presets.md)。
+
 按版本保留 `release-assets/v版本号/` 目录；原安装包未重新编译或改签。归档提交历史已合入 main 并保留，既有发布页中的固定提交下载链接继续使用。
 
 | 版本 | APK | ZIP 备用包 | 校验 |
