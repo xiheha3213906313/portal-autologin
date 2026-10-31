@@ -5,9 +5,62 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import org.json.JSONObject;
 import static org.junit.Assert.*;
 
 public class AccountPresetCatalogTest {
+    @Test public void additiveRootAndEntryFieldsAreIgnoredWithoutChangingCredentials() throws Exception {
+        JSONObject root=new JSONObject(sample()).put("futureMetadata",new JSONObject().put("enabled",true));
+        root.getJSONArray("accounts").getJSONObject(0).put("futureOptions",new JSONObject().put("mode","unknown"));
+        List<SavedAccountBook.Account> accounts=AccountPresetCatalog.parse(root.toString());
+        assertEquals(1,accounts.size());assertEquals(" a+&密 ",accounts.get(0).password);
+    }
+    @Test public void otherPortalWithSameUsernameAndDifferentFieldsDoesNotBreakCurrentPortal() throws Exception {
+        JSONObject root=new JSONObject(sample());
+        root.getJSONArray("accounts").put(new JSONObject().put("portalId","other-portal")
+            .put("username","guest").put("password",42).put("label",JSONObject.NULL));
+        root.getJSONArray("accounts").put(new JSONObject().put("portalId","sms-portal").put("phone",123));
+        List<SavedAccountBook.Account> accounts=AccountPresetCatalog.parse(root.toString());
+        assertEquals(1,accounts.size());assertEquals("guest",accounts.get(0).username);
+    }
+    @Test public void futureEntrySchemaIsSkippedBeforeCheckingLegacyRequiredFields() throws Exception {
+        JSONObject root=new JSONObject(sample());
+        root.getJSONArray("accounts").getJSONObject(0).put("portalId","bytedance").put("schemaVersion",1);
+        root.getJSONArray("accounts").put(new JSONObject().put("portalId","bytedance")
+            .put("schemaVersion",2).put("username","guest").put("newAuthentication",true));
+        assertEquals(1,AccountPresetCatalog.parse(root.toString()).size());
+    }
+    @Test public void unrecognizedPortalIdentifiersNeverFallBackToTheCurrentPortal() throws Exception {
+        for(Object id:Arrays.asList(JSONObject.NULL,17,"","BYTEDANCE",new JSONObject())) {
+            JSONObject root=new JSONObject(sample());
+            root.getJSONArray("accounts").put(new JSONObject().put("portalId",id));
+            assertEquals(1,AccountPresetCatalog.parse(root.toString()).size());
+        }
+    }
+    @Test public void unsupportedOnlyCatalogRetainsExistingPresetsInsteadOfWithdrawingThem() throws Exception {
+        SavedAccountBook book=new SavedAccountBook();book.seed(Arrays.asList(new SavedAccountBook.Account("old","secret","旧配置")));
+        String before=book.getAccounts().get(0).password;
+        String[] catalogs={"{\"version\":1,\"accounts\":[{\"portalId\":\"other\"}]}",
+            "{\"version\":1,\"accounts\":[{\"portalId\":\"bytedance\",\"schemaVersion\":2}]}",
+            "{\"version\":1,\"accounts\":[null,42]}"};
+        for(String catalog:catalogs) {
+            try {book.replacePresets(AccountPresetCatalog.parse(catalog));fail();}
+            catch(IOException expected){assertEquals("unsupported_presets",expected.getMessage());}
+            assertEquals(before,book.getAccounts().get(0).password);
+        }
+    }
+    @Test public void foreignEntriesDoNotConsumeTheCurrentPortalEntryLimit() throws Exception {
+        JSONObject root=new JSONObject(sample());
+        for(int i=0;i<201;i++)root.getJSONArray("accounts").put(new JSONObject().put("portalId","other"));
+        assertEquals(1,AccountPresetCatalog.parse(root.toString()).size());
+    }
+    @Test public void cacheEncodingTagsLegacyEntriesWithoutAddingUnsupportedPortalData() throws Exception {
+        List<SavedAccountBook.Account> legacy=AccountPresetCatalog.parse(sample());
+        JSONObject encoded=new JSONObject(AccountPresetCatalog.encode(legacy));
+        JSONObject entry=encoded.getJSONArray("accounts").getJSONObject(0);
+        assertEquals("bytedance",entry.getString("portalId"));assertEquals(1,entry.getInt("schemaVersion"));
+        assertEquals(legacy.get(0).password,AccountPresetCatalog.parse(encoded.toString()).get(0).password);
+    }
     private static String sample() {
         return "{\"version\":1,\"accounts\":[{\"label\":\"测试地点\",\"username\":\" guest \",\"password\":\" a+&密 \"}]}";
     }
