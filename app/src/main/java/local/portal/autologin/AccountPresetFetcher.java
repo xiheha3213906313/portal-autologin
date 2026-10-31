@@ -13,14 +13,15 @@ final class AccountPresetFetcher {
     private final Transport transport;
     AccountPresetFetcher(Transport transport){this.transport=transport;}
     List<SavedAccountBook.Account> fetch() throws Exception {
-        URL url=new URL(ProjectLinks.ACCOUNT_PRESETS+"?v="+System.currentTimeMillis());
+        URL url=new URL(ProjectLinks.ACCOUNT_PRESETS+"&v="+System.currentTimeMillis());
         HttpURLConnection connection=transport.open(url);
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
         try {
             connection.setConnectTimeout(5000);connection.setReadTimeout(5000);
             connection.setInstanceFollowRedirects(false);connection.setUseCaches(false);
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("Accept","application/json");
+            // Contents API returns the file body directly on api.github.com with this media type.
+            connection.setRequestProperty("Accept","application/vnd.github.raw+json");
             connection.setRequestProperty("Cache-Control","no-cache, no-store");
             connection.setRequestProperty("User-Agent","PortalAutoPresets/1.0");
             int code=connection.getResponseCode();

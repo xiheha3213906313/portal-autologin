@@ -54,14 +54,16 @@ public class AccountPresetCatalogTest {
     @Test public void downloadUsesOnlyProjectHttpsGetAndNeverFollowsRedirects() throws Exception {
         List<Fake> opened=new ArrayList<>();
         List<SavedAccountBook.Account> accounts=new AccountPresetFetcher(url->{
-            assertEquals("https",url.getProtocol());assertEquals("raw.githubusercontent.com",url.getHost());
-            assertEquals("/xiheha3213906313/portal-autologin/main/release-assets/account-presets.json",url.getPath());
-            assertTrue(url.getQuery().matches("v=[0-9]+"));
+            assertEquals("https",url.getProtocol());assertEquals("api.github.com",url.getHost());
+            assertEquals("/repos/xiheha3213906313/portal-autologin/contents/release-assets/account-presets.json",url.getPath());
+            assertTrue(url.getQuery().matches("ref=main&v=[0-9]+"));
             Fake f=new Fake(url,sample().getBytes(StandardCharsets.UTF_8));opened.add(f);return f;
         }).fetch();
         assertEquals(1,opened.size());Fake connection=opened.get(0);
         assertEquals("GET",connection.getRequestMethod());assertFalse(connection.getDoOutput());
         assertFalse(connection.getInstanceFollowRedirects());assertFalse(connection.getUseCaches());
+        assertEquals("application/vnd.github.raw+json",connection.getRequestProperty("Accept"));
+        assertEquals(5000,connection.getConnectTimeout());assertEquals(5000,connection.getReadTimeout());
         assertNull(connection.getRequestProperty("Authorization"));assertNull(connection.getRequestProperty("Cookie"));
         assertTrue(connection.closed);assertEquals("guest",accounts.get(0).username);
     }
@@ -69,7 +71,9 @@ public class AccountPresetCatalogTest {
         for(int mode=0;mode<3;mode++) {
             byte[] bytes=mode==1?new byte[AccountPresetCatalog.MAX_BYTES+1]:mode==2?new byte[]{(byte)0xc3,0x28}:new byte[0];
             Fake f=new Fake(new URL(ProjectLinks.ACCOUNT_PRESETS),bytes);if(mode==0)f.code=302;
-            try {new AccountPresetFetcher(url->f).fetch();fail();}catch(IOException expected){}
+            int[] calls={0};
+            try {new AccountPresetFetcher(url->{calls[0]++;return f;}).fetch();fail();}catch(IOException expected){}
+            assertEquals(1,calls[0]);
             assertTrue(f.closed);
         }
     }
