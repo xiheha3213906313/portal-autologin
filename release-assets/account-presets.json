@@ -10,21 +10,6 @@
       "label": "芜湖9-3",
       "username": "byte13614407116",
       "password": "hqqvq2wn"
-    },
-    {
-      "label": "测试预设一",
-      "username": "preset_demo_01",
-      "password": "DemoOnly-01!"
-    },
-    {
-      "label": "测试预设二",
-      "username": "preset_demo_02",
-      "password": "DemoOnly+02&"
-    },
-    {
-      "label": "测试预设三",
-      "username": "preset_demo_03",
-      "password": "DemoOnly-03#"
     }
   ]
 }
