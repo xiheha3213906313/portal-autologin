@@ -142,14 +142,28 @@ class SettingsActivity : ComponentActivity() {
                     }
                 }
                 BackHandler(enabled = backgroundExit) { hideTaskInBackground() }
-                val accountPage = showSettings || state.stage == AppLoginController.Stage.CONFIGURATION
+                val quickStart = !showSettings &&
+                    (prefs.getString("username", "").isNullOrBlank() || prefs.getString("password", "").isNullOrEmpty())
+                val accountPage = showSettings || quickStart
+                val presetUpdates = remember { AccountPresetUpdates.get(this@SettingsActivity) }
+                var quickStartRefreshed by rememberSaveable { mutableStateOf(false) }
+                LaunchedEffect(quickStart) {
+                    if (quickStart && !quickStartRefreshed) {
+                        quickStartRefreshed = true
+                        presetUpdates.refresh(silent = true)
+                    }
+                }
                 SideEffect {
                     if (accountPage) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 }
-                if (accountPage) {
+                if (showSettings) {
                     BackHandler(enabled = showSettings) { showSettings = false }
                     SettingsPage(prefs, updates, showUpdate, version)
+                } else if (quickStart) {
+                    QuickStartPage(accountStore, presetUpdates, moduleAvailable, xiaomiSystem,
+                        onStart = ::saveQuickStart,
+                        onSettings = { showSettings = true })
                 } else {
                     LoginResultPage(state, login, moduleAvailable, xiaomiSystem,
                         onSettings = { pendingSavedCheck = false; showSettings = true },
@@ -196,6 +210,20 @@ class SettingsActivity : ComponentActivity() {
         foreground = false
         login.leaveForeground()
         super.onPause()
+    }
+
+    private fun saveQuickStart(username: String, password: String): String? {
+        val account = username.trim()
+        if (account.isBlank() || password.isEmpty()) return "请输入账号和密码"
+        if (!accountStore.remember(account, password)) return "账号保存失败，请重试"
+        if (!prefs.edit().putString("username", account).putString("password", password).commit())
+            return "保存失败，请重试"
+        notifyConfigChanged()
+        pendingSavedCheck = false
+        showSettings = false
+        login.saved()
+        BackgroundLoginService.sync(this)
+        return null
     }
 
     @Composable
@@ -478,7 +506,7 @@ class SettingsActivity : ComponentActivity() {
                                 focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
                             }), trailingIcon = {
                                 AccountPicker(show = accountPicker, accounts = savedAccounts,
-                                    fetching = presetUpdates.fetching, feedback = presetUpdates.feedback,
+                                    fetching = presetUpdates.showRefreshProgress, feedback = presetUpdates.feedback,
                                     onRefresh = { presetUpdates.refresh() },
                                     onOpen = {
                                         focus.clearFocus(); savedAccounts = accountStore.accounts
@@ -572,7 +600,7 @@ class SettingsActivity : ComponentActivity() {
             requestLocation = ::requestWifiNamePermission, requestAutoStart = ::openAutoStartSettings,
             openSettings = ::openBackgroundSettings)
 
-        SuperDialog(show = confirmClear, title = "清除账号？", summary = "清除自存账号与登录配置，保留内置预设",
+        SuperDialog(show = confirmClear, title = "清除账号？", summary = "清除自存账号与登录配置，保留预设",
             onDismissRequest = { confirmClear.value = false }) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TextButton(text = "取消", onClick = { confirmClear.value = false }, modifier = Modifier.weight(1f))

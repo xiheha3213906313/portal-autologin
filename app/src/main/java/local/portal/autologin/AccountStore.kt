@@ -26,10 +26,13 @@ internal class AccountStore(context: Context, active: SharedPreferences) {
                     val item = items.getJSONObject(i)
                     SavedAccountBook.Account(item.getString("username"), item.getString("password"), item.optString("label"))
                 }
-                changed = candidate.seed(presets) || changed
+                // Drop obsolete seeded test entries if they were never downloaded. A genuine
+                // downloaded catalog is handled above and remains available offline.
+                changed = candidate.replacePresets(presets) || changed
             }
         } catch (_: FileNotFoundException) {
-            // Public builds have no bundled account presets.
+            if (storage.getString("remote_presets", null) == null)
+                changed = candidate.replacePresets(emptyList()) || changed
         } catch (_: Exception) {
             initializationFailed = true
         }

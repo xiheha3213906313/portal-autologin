@@ -11,9 +11,11 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
-/** User-triggered catalog updates. Keeps no Activity and never edits the active login account. */
+/** Catalog updates. Keeps no Activity and never edits the active login account. */
 internal class AccountPresetUpdates private constructor(private val context: Context) {
     var fetching by mutableStateOf(false); private set
+    private var silentRefresh by mutableStateOf(false)
+    val showRefreshProgress: Boolean get() = fetching && !silentRefresh
     var feedback by mutableStateOf<String?>(null); private set
     var revision by mutableStateOf(0L); private set
     private var feedbackId = 0L
@@ -21,9 +23,14 @@ internal class AccountPresetUpdates private constructor(private val context: Con
     private val worker = ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
         ArrayBlockingQueue<Runnable>(1), { task -> Thread(task, "PortalPresets").apply { isDaemon = true } })
 
-    fun refresh() {
-        if (fetching) return
-        fetching = true; feedback = null
+    fun refresh(silent: Boolean = false) {
+        if (fetching) {
+            // An explicit tap may show the result of an already-running quiet request.
+            if (!silent) silentRefresh = false
+            return
+        }
+        silentRefresh = silent
+        fetching = true; feedback = null; feedbackId++
         DiagnosticLog.event("presets.fetch_started", 0)
         try { worker.execute {
             val response = runCatching {
@@ -47,7 +54,7 @@ internal class AccountPresetUpdates private constructor(private val context: Con
     }
     private fun complete(success: Boolean) {
         fetching = false
-        feedback = if (success) "已获取最新预设" else "获取失败，请重试"
+        feedback = if (silentRefresh) null else if (success) "已获取最新预设" else "获取失败，请重试"
         DiagnosticLog.event("presets.fetch_completed", if (success) 1 else 0)
         val id = ++feedbackId
         main.postDelayed({ if (feedbackId == id) feedback = null }, 1800)

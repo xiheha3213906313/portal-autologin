@@ -13,8 +13,8 @@ android {
         applicationId 'local.portal.autologin'
         minSdk 28
         targetSdk 35
-        versionCode 27
-        versionName '1.4.4'
+        versionCode 28
+        versionName '1.4.5'
     }
     signingConfigs {
         if (hasLocalSigning) {
@@ -41,7 +41,7 @@ android {
     kotlinOptions { jvmTarget = '1.8' }
     buildFeatures { compose true }
     sourceSets.main.java.srcDir layout.buildDirectory.dir('generated/portal')
-    // Explicit local builds may bundle user-supplied presets; public builds include none.
+    // Only explicitly supplied original presets may be bundled in local builds.
     if (providers.gradleProperty('includeLocalAccountPreset').getOrElse('false').toBoolean()) {
         sourceSets.main.assets.srcDir rootProject.file('private-preset')
     }
