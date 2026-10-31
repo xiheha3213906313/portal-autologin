@@ -57,9 +57,11 @@ final class InternetCheck {
                 }
                 if (code==200 || code==204) return Result.CAPTIVE;
                 unavailable=true;
-            } catch (Exception ignored) {
+            } catch (Exception failure) {
                 // Library exceptions can contain URLs. Export only the bounded stage code.
                 trace.event(phase+".unavailable",0);
+                String name=failure.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+                if(name.matches("[a-z0-9_]{1,48}"))trace.event(phase+".error."+name,0);
                 unavailable=true;
             } finally {
                 if (connection!=null) connection.disconnect();

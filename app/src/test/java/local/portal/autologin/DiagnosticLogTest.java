@@ -5,7 +5,7 @@ import static org.junit.Assert.*;
 import java.io.IOException;
 
 public class DiagnosticLogTest {
-    @Before public void reset() {DiagnosticLog.setEnabled(false);DiagnosticLog.clear();}
+    @Before public void reset() {DiagnosticLog.attachJournal(null);DiagnosticLog.setEnabled(false);DiagnosticLog.clear();}
     @Test public void disabledByDefaultAndStopsRecording() {
         DiagnosticLog.event("test.before",1);assertFalse(DiagnosticLog.snapshot().contains("test.before"));
         DiagnosticLog.setEnabled(true);DiagnosticLog.event("test.active",2);
@@ -16,7 +16,7 @@ public class DiagnosticLogTest {
         DiagnosticLog.setEnabled(true);
         for(int i=0;i<1000;i++)DiagnosticLog.event("stage.entry",i);
         String s=DiagnosticLog.snapshot();assertFalse(s.contains("stage.entry 0\n"));assertTrue(s.contains("stage.entry 999"));
-        assertTrue(s.split("\n").length<=261);
+        assertTrue(s.split("\n").length<=262);
         DiagnosticLog.clear();assertFalse(DiagnosticLog.snapshot().contains("stage.entry"));
     }
     @Test public void rejectsFreeTextAndNeverExportsExceptionMessages() {

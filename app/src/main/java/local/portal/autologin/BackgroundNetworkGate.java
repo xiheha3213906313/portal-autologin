@@ -6,7 +6,7 @@ import java.util.LinkedHashMap;
 final class BackgroundNetworkGate {
     private static final class Entry {
         boolean started,running,online,captive,validated,observed,pending;
-        long lastAttempt;
+        long lastAttempt,lastOnlineRecovery=-1;
     }
     private final LinkedHashMap<Long,Entry> entries=new LinkedHashMap<>();
     boolean wasChecked(long network) {Entry e=entries.get(network);return e!=null && e.started;}
@@ -37,6 +37,13 @@ final class BackgroundNetworkGate {
         Entry e=entry(network);
         if(e.running || (!explicitRetry && nextCheckDelay(network,now)!=0))return false;
         e.started=true;e.running=true;e.online=false;e.pending=false;e.lastAttempt=now;
+        return true;
+    }
+    boolean beginOnlineRecovery(long network,long now) {
+        Entry e=entries.get(network);
+        if(e==null || !e.started || e.running || e.online ||
+            (e.lastOnlineRecovery>=0 && now-e.lastOnlineRecovery<30000))return false;
+        e.running=true;e.pending=false;e.lastOnlineRecovery=now;
         return true;
     }
     void completed(long network,boolean online) {

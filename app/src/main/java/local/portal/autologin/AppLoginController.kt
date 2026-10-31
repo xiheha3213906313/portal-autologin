@@ -27,7 +27,7 @@ class AppLoginController private constructor(private val context: Context) {
     data class UiState(val stage: Stage = Stage.CONFIGURATION, val message: String = "",
                        val successId: Long = 0, val detail: String = "",
                        val offerForceLogin: Boolean = false, val recommendForceLogin: Boolean = false,
-                       val internetConfirmed: Boolean = false)
+                       val internetConfirmed: Boolean = false, val authenticationRejected: Boolean = false)
     private val uiState = mutableStateOf(UiState())
     private val listeners = linkedSetOf<(UiState) -> Unit>()
     var state: UiState
@@ -58,10 +58,12 @@ class AppLoginController private constructor(private val context: Context) {
     private var successfulNetwork: Network? = null
     private var successSequence = 0L
     private var animatedSuccess = -1L
+    private var jobSequence = 0
 
     private class Job(val network: Network, val force: Boolean = false,
                       val verificationOnly: Boolean = false, var background: Boolean = false,
-                      val ignoreValidation: Boolean = force || background) {
+                      val ignoreValidation: Boolean = force || background, val recoveryOnly: Boolean = false) {
+        var traceId = 0
         @Volatile var active = true
         @Volatile var submitted = false
         @Volatile var credentialsWritten = false
@@ -72,23 +74,27 @@ class AppLoginController private constructor(private val context: Context) {
         var bridgeClaimed = false
         var submittedAt = -1L
         var timeout: Runnable? = null
+        val timeoutRecovery = LoginTimeoutRecovery()
     }
 
     fun initialize(preferences: SharedPreferences, hasModule: Boolean) {
         prefs = preferences; moduleAvailable = hasModule
         forceLoginEnabled = prefs.getBoolean("force_login", false)
         DiagnosticLog.setEnabled(prefs.getBoolean("debug_log", false))
+        DiagnosticLog.event("app.controller_module", if (hasModule) 1 else 0)
     }
     fun enterForeground(preferences: SharedPreferences, hasModule: Boolean) {
         initialize(preferences, hasModule)
         foreground = true
+        DiagnosticLog.event("app.foreground_enter", 0)
         check(false)
     }
     fun addListener(listener: (UiState) -> Unit) { listeners += listener }
     fun removeListener(listener: (UiState) -> Unit) { listeners -= listener }
-    fun attachBackground() { backgroundActive = true }
+    fun attachBackground() { backgroundActive = true; DiagnosticLog.event("app.background_attached", 0) }
     fun detachBackground() {
         backgroundActive = false
+        DiagnosticLog.event("app.background_detached", 0)
         current?.takeIf { it.background && !foreground }?.let { finish(it) }
     }
     fun canBackgroundCheck(network: Network): Boolean = backgroundActive && !moduleAvailable &&
@@ -101,7 +107,19 @@ class AppLoginController private constructor(private val context: Context) {
         check(false, selectedNetwork = network, background = true)
         return true
     }
-    fun leaveForeground() { foreground = false }
+    fun backgroundVerifyOnly(network: Network): Boolean {
+        if (!canBackgroundCheck(network) || current?.active == true) return false
+        val job = Job(network, verificationOnly = true, background = true, recoveryOnly = true)
+            .also { it.traceId = ++jobSequence }
+        checkedNetwork = network
+        current = job
+        DiagnosticLog.event("app.recovery_verify_only", job.traceId)
+        state = UiState(Stage.CONNECTING, "正在确认联网状态")
+        if (!startObservation(job, 15000)) return false
+        verifyInternet(job)
+        return true
+    }
+    fun leaveForeground() { foreground = false; DiagnosticLog.event("app.foreground_leave", 0) }
     fun saved() {
         forceLoginEnabled = prefs.getBoolean("force_login", false)
         DiagnosticLog.setEnabled(prefs.getBoolean("debug_log", false))
@@ -155,7 +173,9 @@ class AppLoginController private constructor(private val context: Context) {
 
     private fun check(retry: Boolean, oneShotForce: Boolean = false, selectedNetwork: Network? = null,
                       background: Boolean = false, ignoreSystemValidation: Boolean = false) {
-        if (!configured()) { clear(); return }
+        DiagnosticLog.event("app.check_flags", (if (retry) 1 else 0) or (if (oneShotForce) 2 else 0) or
+            (if (background) 4 else 0) or (if (ignoreSystemValidation) 8 else 0))
+        if (!configured()) { DiagnosticLog.event("app.config_missing", 0); clear(); return }
         val network = runCatching { if (selectedNetwork != null) selectedNetwork.takeIf { connected(it) } else wifi() }.getOrNull()
         if (network == null) {
             current?.let { finish(it) }
@@ -166,6 +186,7 @@ class AppLoginController private constructor(private val context: Context) {
             return
         }
         val force = ordinaryMode && (oneShotForce || forceLoginEnabled)
+        DiagnosticLog.event("app.check_network", network.hashCode())
         current?.let {
             // A forced click may replace a passive check, but never a running authentication.
             if (it.network == network && it.active && !(force && it.verificationOnly)) {
@@ -183,7 +204,8 @@ class AppLoginController private constructor(private val context: Context) {
         }
         checkedNetwork = network
         if (!force && !ignoreSystemValidation && (background || validated(network))) {
-            val job = Job(network, verificationOnly = true, background = background)
+            val job = Job(network, verificationOnly = true, background = background).also { it.traceId = ++jobSequence }
+            DiagnosticLog.event("app.job_id", job.traceId)
             current = job
             showOnline(job, confirmed = false)
             DiagnosticLog.event(if (background) "app.background_verify_first" else "app.system_validated", 1)
@@ -204,7 +226,8 @@ class AppLoginController private constructor(private val context: Context) {
         }
         if (decision == LoginAttempts.Decision.RUNNING) return
         val job = Job(network, force, background = background,
-            ignoreValidation = force || background || ignoreSystemValidation)
+            ignoreValidation = force || background || ignoreSystemValidation).also { it.traceId = ++jobSequence }
+        DiagnosticLog.event("app.job_id", job.traceId)
         current = job
         state = UiState(Stage.CONNECTING, if (force) "正在强制登录" else "正在连接")
         DiagnosticLog.event("app.attempt_started", if (force) 1 else 0)
@@ -224,10 +247,28 @@ class AppLoginController private constructor(private val context: Context) {
         try { observe(job) } catch (e: Exception) {
             DiagnosticLog.failure(e); fail(job, "暂时无法检查 Wi-Fi 状态"); return false
         }
+        DiagnosticLog.event("app.observer_ready", job.traceId)
+        DiagnosticLog.event("app.observer_timeout_ms", timeoutMs.toInt())
+        DiagnosticLog.event("app.observer_elapsed_s", (SystemClock.elapsedRealtime() / 1000).toInt())
+        DiagnosticLog.event("app.observer_uptime_s", (SystemClock.uptimeMillis() / 1000).toInt())
         job.timeout = Runnable {
             if (current !== job || !job.active) return@Runnable
             DiagnosticLog.event("app.attempt_timeout", if (job.submitted) 1 else 0)
-            verificationFailed(job, "暂时无法确认当前 Wi-Fi 的互联网连接")
+            DiagnosticLog.event("app.timeout_elapsed_s", (SystemClock.elapsedRealtime() / 1000).toInt())
+            DiagnosticLog.event("app.timeout_uptime_s", (SystemClock.uptimeMillis() / 1000).toInt())
+            if (job.timeoutRecovery.begin(job.submitted, connected(job.network))) {
+                // A delayed main-thread timeout may run ahead of a successful POST completion.
+                // Keep the original job and check its Wi-Fi; do not replay or restart authentication.
+                DiagnosticLog.event("app.timeout_verifying", job.traceId)
+                job.authenticationFinished = true
+                state = UiState(Stage.CONNECTING, "正在确认联网状态")
+                job.timeout = Runnable {
+                    if (current === job && job.active)
+                        verificationFailed(job, "暂时无法确认当前 Wi-Fi 的互联网连接")
+                }.also { main.postDelayed(it, 15000) }
+                verifyInternet(job)
+                probe(job.network)
+            } else verificationFailed(job, "暂时无法确认当前 Wi-Fi 的互联网连接")
         }.also { main.postDelayed(it, timeoutMs) }
         return true
     }
@@ -257,6 +298,8 @@ class AppLoginController private constructor(private val context: Context) {
         job.verificationRetry = null
         job.checkingInternet = true
         job.internetChecks++
+        DiagnosticLog.event("app.internet_job", job.traceId)
+        DiagnosticLog.event("app.internet_check_count", job.internetChecks)
         DiagnosticLog.event("app.internet.started", if (job.verificationOnly) 0 else 1)
         try { verifier.execute {
             val result = InternetCheck({ url -> job.network.openConnection(url) as HttpURLConnection }, {
@@ -265,6 +308,7 @@ class AppLoginController private constructor(private val context: Context) {
             main.post {
                 if (current !== job || !job.active) return@post
                 job.checkingInternet = false
+                DiagnosticLog.event("app.internet_result_job", job.traceId)
                 DiagnosticLog.event("app.internet.result", result.ordinal)
                 // Never apply a completed check to a different Wi-Fi after a network switch.
                 if (!connected(job.network) || (!job.background && wifi() != job.network)) {
@@ -291,7 +335,7 @@ class AppLoginController private constructor(private val context: Context) {
 
     private fun verificationFailed(job: Job, detail: String) {
         if (current !== job) return
-        if (job.verificationOnly && job.background && backgroundActive &&
+        if (job.verificationOnly && !job.recoveryOnly && job.background && backgroundActive &&
             prefs.getBoolean("background_login", false) && connected(job.network)) {
             DiagnosticLog.event("app.background_validation_mismatch", 0)
             finish(job)
@@ -302,7 +346,7 @@ class AppLoginController private constructor(private val context: Context) {
         val submitted = job.submitted
         finish(job)
         successfulNetwork = null
-        state = UiState(Stage.ERROR, if (submitted) "登录失败" else "未进行登录",
+        state = UiState(Stage.ERROR, if (submitted || job.recoveryOnly) "暂未确认联网" else "未进行登录",
             detail = detail, offerForceLogin = ordinaryMode && connected(job.network))
     }
 
@@ -342,6 +386,7 @@ class AppLoginController private constructor(private val context: Context) {
 
     private fun authenticate(job: Job) {
         if (current !== job || !job.active) return
+        DiagnosticLog.event("app.authenticate_job", job.traceId)
         val user = prefs.getString("username", "") ?: ""
         val pass = prefs.getString("password", "") ?: ""
         try { worker.execute {
@@ -420,10 +465,15 @@ class AppLoginController private constructor(private val context: Context) {
     }
     private fun fail(job: Job, message: String, rejected: Boolean = false) {
         if (current !== job) return
+        DiagnosticLog.event("app.job_failed", job.traceId)
+        DiagnosticLog.event("app.job_rejected", if (rejected) 1 else 0)
         finish(job, rejected)
-        state = UiState(Stage.ERROR, message, offerForceLogin = ordinaryMode && connected(job.network))
+        state = UiState(Stage.ERROR, message, offerForceLogin = ordinaryMode && connected(job.network),
+            authenticationRejected = rejected)
     }
     private fun finish(job: Job, rejected: Boolean = false) = synchronized(job) {
+        DiagnosticLog.event("app.job_finished", job.traceId)
+        DiagnosticLog.event("app.job_submitted", if (job.submitted) 1 else 0)
         job.active = false
         job.timeout?.let { main.removeCallbacks(it) }
         job.verificationRetry?.let { main.removeCallbacks(it) }

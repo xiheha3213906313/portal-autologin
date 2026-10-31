@@ -4,6 +4,35 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class BackgroundNetworkGateTest {
+    @Test public void validationAfterUncertainSubmissionAllowsProbesWithoutClearingPostProtection() {
+        BackgroundNetworkGate gate=new BackgroundNetworkGate();
+        LoginAttempts attempts=new LoginAttempts();
+        gate.observe(10,true,false);assertTrue(gate.begin(10,1000,false));
+        assertEquals(LoginAttempts.Decision.ALLOW,attempts.begin(10,1000,-1,-1,false));
+        attempts.submitted(10,1100);attempts.finish(10,false);gate.completed(10,false);
+        gate.observe(10,false,true);
+        assertTrue(gate.beginOnlineRecovery(10,75000));
+        assertFalse(gate.begin(10,75001,false));
+        assertEquals(LoginAttempts.Decision.RECENT_SUBMISSION,attempts.begin(10,75001,10,1100,false));
+        gate.completed(10,true);assertFalse(gate.beginOnlineRecovery(10,76000));
+    }
+    @Test public void repeatedValidationSignalsCannotLoopFailedVerification() {
+        BackgroundNetworkGate gate=new BackgroundNetworkGate();
+        gate.observe(10,true,false);gate.begin(10,1000,false);gate.completed(10,false);
+        gate.observe(10,false,true);assertTrue(gate.beginOnlineRecovery(10,2000));
+        assertFalse(gate.beginOnlineRecovery(10,2100));gate.completed(10,false);
+        gate.observe(10,true,false);gate.observe(10,false,true);
+        assertFalse(gate.beginOnlineRecovery(10,3000));
+        assertFalse(gate.begin(10,32000,false));
+        assertTrue(gate.beginOnlineRecovery(10,32000));
+    }
+    @Test public void onlineOrLostNetworkDoesNotStartAnUnrelatedRecovery() {
+        BackgroundNetworkGate gate=new BackgroundNetworkGate();
+        assertFalse(gate.beginOnlineRecovery(10,1000));
+        gate.observe(10,false,true);gate.begin(10,1000,false);gate.completed(10,true);
+        assertFalse(gate.beginOnlineRecovery(10,2000));gate.lost(10);
+        assertFalse(gate.beginOnlineRecovery(10,40000));
+    }
     private static void startOnline(BackgroundNetworkGate gate, long network) {
         gate.observe(network,false,true);
         assertTrue(gate.begin(network,1000,false));

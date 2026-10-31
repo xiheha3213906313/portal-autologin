@@ -717,6 +717,7 @@ class SettingsActivity : ComponentActivity() {
         ModuleBridge.synchronize()
     }
     private fun requestLogExport() {
+        DiagnosticLog.event("diagnostic.export_begin", 0)
         BackgroundLoginService.recordState(this)
         ModuleBridge.recordState()
         sendOrderedBroadcast(Intent(SilentPortal.LOG_EXPORT).setPackage("android"), null,

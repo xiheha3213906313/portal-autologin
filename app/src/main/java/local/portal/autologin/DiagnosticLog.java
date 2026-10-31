@@ -1,13 +1,17 @@
 package local.portal.autologin;
 
 import java.text.SimpleDateFormat;
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 
-/** Bounded in-memory trace. Only stage tokens, integer counters and allowlisted faults. */
+/** Stage tokens only. The app attaches a bounded private journal; injected processes stay in memory. */
 public final class DiagnosticLog {
-    public static final String VERSION="1.4.2";
+    public static final String VERSION="1.4.3";
     private static boolean enabled;
     private static final ArrayDeque<String> lines=new ArrayDeque<>();
+    private static DiagnosticJournal journal;
+    private static boolean persistenceFailed;
     private static final Set<String> REASONS=new HashSet<>(Arrays.asList(
         "unexpected_origin","missing_frame","unexpected_frame","invalid_credentials_length",
         "missing_form","unexpected_form","unexpected_fields","disabled_button","changed_fields",
@@ -17,21 +21,49 @@ public final class DiagnosticLog {
         if(enabled==value)return;
         enabled=value;append(value?"logging.enabled":"logging.disabled");
     }
+    static synchronized boolean isEnabled() { return enabled; }
+    static synchronized void attachJournal(File directory) {
+        journal=directory==null?null:new DiagnosticJournal(directory);
+        persistenceFailed=false;
+    }
     public static synchronized void event(String stage,int detail) {
         if(!enabled || stage==null || !stage.matches("[a-z0-9_.:-]{1,96}"))return;
         append(stage+" "+detail);
     }
     private static void append(String value) {
+        String line=new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS",Locale.ROOT).format(new Date())+" "+value;
         if(lines.size()>=256)lines.removeFirst();
-        lines.addLast(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS",Locale.ROOT).format(new Date())+" "+value);
+        lines.addLast(line);
+        if(journal!=null)try {journal.append(line);}catch(IOException|RuntimeException e){persistenceFailed=true;}
     }
     public static synchronized void clear() {
-        lines.clear();if(enabled)append("logging.cleared");
+        lines.clear();persistenceFailed=false;
+        if(journal!=null)try {journal.clear();}catch(IOException|RuntimeException e){persistenceFailed=true;}
+        if(enabled)append("logging.cleared");
     }
     public static synchronized String snapshot() {
+        String history=String.join("\n",lines)+"\n";
+        if(journal!=null)try {
+            String saved=journal.read();
+            history=persistenceFailed?saved+"In-memory fallback\n"+history:saved;
+        }catch(IOException|RuntimeException e){persistenceFailed=true;}
         return "PortalAuto "+VERSION+"\nlogging="+(enabled?"on":"off")+
+            "\npersistence="+(journal==null?"memory":persistenceFailed?"error":"private-files")+
             "\nOnly stage codes and counters; no credentials, cookies, URLs or response bodies.\n"+
-            String.join("\n",lines)+"\n";
+            history;
+    }
+    static synchronized void crash(Throwable error,boolean mainThread) {
+        if(!enabled)return;
+        event("crash.uncaught",mainThread?1:0);failure(error);
+        int count=0;
+        for(StackTraceElement frame:error.getStackTrace()) {
+            if(!frame.getClassName().startsWith("local.portal.autologin."))continue;
+            String name=frame.getClassName().substring("local.portal.autologin.".length())+"."+frame.getMethodName();
+            name=name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_.:-]","_");
+            event("crash.frame."+name.substring(0,Math.min(80,name.length())),frame.getLineNumber());
+            if(++count==8)break;
+        }
+        if(enabled && journal!=null)try {journal.sync();}catch(IOException|RuntimeException e){persistenceFailed=true;}
     }
     public static void failure(Throwable e) {
         // Exception messages from network libraries may contain sensitive URLs: never export them.
