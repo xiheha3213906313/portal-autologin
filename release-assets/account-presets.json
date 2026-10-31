@@ -10,6 +10,46 @@
       "label": "芜湖9-3",
       "username": "byte13614407116",
       "password": "hqqvq2wn"
+    },
+    {
+      "label": "测试配置 01（不可登录）",
+      "username": "preset_demo_01",
+      "password": "demo-only-01"
+    },
+    {
+      "label": "测试配置 02（不可登录）",
+      "username": "preset_demo_02",
+      "password": "demo-only-02"
+    },
+    {
+      "label": "测试配置 03（不可登录）",
+      "username": "preset_demo_03",
+      "password": "demo-only-03"
+    },
+    {
+      "label": "测试配置 04（不可登录）",
+      "username": "preset_demo_04",
+      "password": "demo-only-04"
+    },
+    {
+      "label": "测试配置 05（不可登录）",
+      "username": "preset_demo_05",
+      "password": "demo-only-05"
+    },
+    {
+      "label": "测试配置 06（不可登录）",
+      "username": "preset_demo_06",
+      "password": "demo-only-06"
+    },
+    {
+      "label": "测试配置 07（不可登录）",
+      "username": "preset_demo_07",
+      "password": "demo-only-07"
+    },
+    {
+      "label": "测试配置 08（不可登录）",
+      "username": "preset_demo_08",
+      "password": "demo-only-08"
     }
   ]
 }
